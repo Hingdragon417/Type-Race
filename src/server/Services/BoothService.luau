@@ -14,6 +14,10 @@ local BoothService = Knit.CreateService({
         PlayerWon = Knit.CreateSignal(),
         PlayerLost = Knit.CreateSignal(),
         ShowGameResult = Knit.CreateSignal(),
+        ReportWPM = Knit.CreateSignal(),
+        ValidateWordCompletion = Knit.CreateSignal(),
+        UpdateWPM = Knit.CreateSignal(),
+        UpdateOpponentProgress = Knit.CreateSignal(),
     }
 })
 
@@ -28,6 +32,10 @@ local activeGames = {}
 local playerErrors = {}
 local playerWordsCompleted = {}
 local spawnedKeyboards = {}
+local playerWPM = {}
+local playerTypingStats = {}
+local wpmUpdateLoops = {}
+local DataService
 
 local function isPlayerInBooth(player: Player): boolean
     return activeBooths[player] ~= nil
@@ -64,13 +72,61 @@ local function removeSpawnedKeyboard(player: Player, boothModel: Model)
     spawnedKeyboards[boothModel][player] = nil
 end
 
+local function calculateWPM(player: Player, boothModel: Model): number
+    local stats = playerTypingStats[player]
+    if not stats then return 0 end
+    
+    local elapsedTime = tick() - stats.startTime
+    local elapsedMinutes = elapsedTime / 60
+    
+    if elapsedMinutes == 0 then return 0 end
+    
+    local timeSinceLastType = tick() - stats.lastTypeTime
+    local decayFactor = 1
+    if timeSinceLastType > 2 then
+        decayFactor = math.max(0.1, 1 - ((timeSinceLastType - 2) * 0.1))
+    end
+    
+    local wordsTyped = stats.correctWordCount
+    local baseWPM = wordsTyped / elapsedMinutes
+    
+    return math.floor(baseWPM * decayFactor)
+end
+
+local function startWPMUpdates(boothModel: Model)
+    if wpmUpdateLoops[boothModel] then
+        task.cancel(wpmUpdateLoops[boothModel])
+    end
+    
+    wpmUpdateLoops[boothModel] = task.spawn(function()
+        while isGameActive(boothModel) do
+            local playersInBooth = getPlayersInBooth(boothModel)
+            for _, player in ipairs(playersInBooth) do
+                local wpm = calculateWPM(player, boothModel)
+                BoothService.Client.UpdateWPM:Fire(player, wpm)
+            end
+            task.wait(0.1)
+        end
+    end)
+end
+
+local function stopWPMUpdates(boothModel: Model)
+    if wpmUpdateLoops[boothModel] then
+        task.cancel(wpmUpdateLoops[boothModel])
+        wpmUpdateLoops[boothModel] = nil
+    end
+end
+
 local function endGame(boothModel: Model)
+    stopWPMUpdates(boothModel)
     activeGames[boothModel] = nil
     
     local playersInBooth = getPlayersInBooth(boothModel)
     for _, player in ipairs(playersInBooth) do
         playerErrors[player] = nil
         playerWordsCompleted[player] = nil
+        playerWPM[player] = nil
+        playerTypingStats[player] = nil
     end
 end
 
@@ -88,11 +144,19 @@ local function startGame(boothModel: Model, words: {string})
     for _, player in ipairs(playersInBooth) do
         playerErrors[player] = 0
         playerWordsCompleted[player] = 0
+        playerTypingStats[player] = {
+            startTime = tick(),
+            lastTypeTime = tick(),
+            correctWordCount = 0,
+            totalCharactersTyped = 0,
+        }
     end
     
     for _, player in ipairs(playersInBooth) do
         BoothService.Client.StartGame:Fire(player, boothModel, words)
     end
+    
+    startWPMUpdates(boothModel)
 end
 
 local function kickPlayerFromSeat(player: Player)
@@ -111,10 +175,69 @@ local function kickPlayerFromSeat(player: Player)
     end
 end
 
+local function updatePlayerStats(player: Player, won: boolean, averageWPM: number)
+    if not DataService then
+        print("[BoothService] DataService is nil")
+        return
+    end
+    
+    local session = DataService:getSession(player)
+    if not session or not session.Data then
+        print("[BoothService] No session or data for player:", player.Name)
+        return
+    end
+    
+    local data = session.Data
+    
+    print("[BoothService] Before update - Player:", player.Name, "Won:", won, "Coins:", data.Coins, "Wins:", data.Wins, "Winstreak:", data.Winstreak)
+    
+    if won then
+        data.Coins = (data.Coins or 0) + 25
+        data.Wins = (data.Wins or 0) + 1
+        data.Winstreak = (data.Winstreak or 0) + 1
+        
+        if data.Winstreak > (data.HighestWinstreak or 0) then
+            data.HighestWinstreak = data.Winstreak
+        end
+    else
+        data.Coins = (data.Coins or 0) + 10
+        data.Losses = (data.Losses or 0) + 1
+        data.Winstreak = 0
+    end
+    
+    data.WPM = math.floor(averageWPM)
+    
+    local totalGames = (data.Wins or 0) + (data.Losses or 0)
+    if totalGames > 0 then
+        data.WinRate = math.floor((data.Wins / totalGames) * 100)
+    else
+        data.WinRate = 0
+    end
+    
+    print("[BoothService] After update - Coins:", data.Coins, "Wins:", data.Wins, "Winstreak:", data.Winstreak, "WPM:", data.WPM)
+    
+    DataService:updateLeaderstats(player, "Winstreak", data.Winstreak)
+    DataService:updateLeaderstats(player, "Wins", data.Wins)
+    
+    DataService:Replicate(player, "Coins")
+    DataService:Replicate(player, "Wins")
+    DataService:Replicate(player, "Losses")
+    DataService:Replicate(player, "Winstreak")
+    DataService:Replicate(player, "HighestWinstreak")
+    DataService:Replicate(player, "WPM")
+    DataService:Replicate(player, "WinRate")
+    
+    print("[BoothService] Replicated stats for player:", player.Name)
+end
+
 local function endGameWithWinner(boothModel: Model, winner: Player)
     local playersInBooth = getPlayersInBooth(boothModel)
     
     for _, player in ipairs(playersInBooth) do
+        local wpm = playerWPM[player] or 0
+        local won = player == winner
+        updatePlayerStats(player, won, wpm)
+        
         if player == winner then
             BoothService.Client.ShowGameResult:Fire(player, true, winner.Name)
         else
@@ -241,6 +364,17 @@ local function startBoothCountdown(boothModel: Model)
             hideBoothStatus(boothModel)
             
             local playersInBooth = getPlayersInBooth(boothModel)
+            
+            for _, player in ipairs(playersInBooth) do
+                if player.Character then
+                    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+                    if humanoid then
+                        humanoid.JumpPower = 0
+                        humanoid.JumpHeight = 0
+                    end
+                end
+            end
+            
             for _, player in ipairs(playersInBooth) do
                 BoothService.Client.BeginCountdown:Fire(player, COUNTDOWN_SECONDS)
             end
@@ -291,8 +425,11 @@ local function spawnKeyboardForPlayer(player: Player, boothModel: Model, seatNam
         return
     end
     
+    local forward = spawnPoint.CFrame.LookVector
+    local targetCFrame = CFrame.lookAt(spawnPoint.Position, spawnPoint.Position + forward)
+    
     local clonedKeyboard = keyboardModel:Clone()
-    clonedKeyboard:PivotTo(spawnPoint.CFrame)
+    clonedKeyboard:PivotTo(targetCFrame)
     clonedKeyboard.Parent = boothModel
     
     if not spawnedKeyboards[boothModel] then
@@ -449,6 +586,69 @@ function BoothService:KnitStart()
         end
     end)
     
+    self.Client.ValidateWordCompletion:Connect(function(player, wordIndex, word)
+        if not player or not player.Parent then
+            return
+        end
+        
+        local boothModel = activeBooths[player]
+        if not boothModel or not isGameActive(boothModel) then
+            return
+        end
+        
+        local gameData = activeGames[boothModel]
+        if not gameData or not gameData.words then
+            return
+        end
+        
+        if wordIndex < 1 or wordIndex > #gameData.words then
+            return
+        end
+        
+        if gameData.words[wordIndex] ~= word then
+            return
+        end
+        
+        local stats = playerTypingStats[player]
+        if stats then
+            stats.correctWordCount = stats.correctWordCount + 1
+            stats.lastTypeTime = tick()
+            
+            local currentWPM = calculateWPM(player, boothModel)
+            playerWPM[player] = currentWPM
+        end
+        
+        playerWordsCompleted[player] = (playerWordsCompleted[player] or 0) + 1
+        
+        local gameData = activeGames[boothModel]
+        local totalWords = gameData and gameData.words and #gameData.words or 1
+        local progress = playerWordsCompleted[player] / totalWords
+        
+        local playersInBooth = getPlayersInBooth(boothModel)
+        for _, otherPlayer in ipairs(playersInBooth) do
+            if otherPlayer ~= player then
+                BoothService.Client.UpdateOpponentProgress:Fire(otherPlayer, player.UserId, progress)
+            end
+        end
+    end)
+    
+    self.Client.PlayerWon:Connect(function(player)
+        if not player or not player.Parent then
+            return
+        end
+        
+        local boothModel = activeBooths[player]
+        if not boothModel or not isGameActive(boothModel) then
+            return
+        end
+        
+        local finalWPM = calculateWPM(player, boothModel)
+        playerWPM[player] = finalWPM
+        
+        print(player.Name .. " won the game!")
+        endGameWithWinner(boothModel, player)
+    end)
+    
     Players.PlayerRemoving:Connect(function(player)
         if isPlayerInBooth(player) then
             self:RemovePlayerFromBooth(player)
@@ -457,6 +657,7 @@ function BoothService:KnitStart()
 end
 
 function BoothService:KnitInit()
+    DataService = Knit.GetService("DataService")
 end
 
 return BoothService

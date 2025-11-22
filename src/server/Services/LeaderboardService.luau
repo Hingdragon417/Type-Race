@@ -30,12 +30,12 @@ local LeaderboardService = Knit.CreateService({
 local Leaderboards = {
 	maxEntries = 10,
 	SavedStats = {
-		"Wins",
-		"Coins"
+		"Winstreak",
+		"Wins"
 	},
 	StatColours = {
+		Winstreak = Color3.fromRGB(255, 145, 0),
 		Wins = Color3.fromRGB(42, 126, 194),
-		Coins = Color3.fromRGB(255, 145, 0),
 	},
 	updateCooldowns = {},
 	cooldownTime = 10,
@@ -47,7 +47,7 @@ local Leaderboards = {
 
 local DataModule = {}
 
-local LeaderboardData: DataStore = DataStoreService:GetDataStore("LeaderboardData_TEST2")
+local LeaderboardData: DataStore = DataStoreService:GetDataStore("LeaderboardData_TEST3")
 
 function DataModule:GetLeaderboardData(): any
 	local success, data = pcall(function()
@@ -96,7 +96,7 @@ local CacheUtil = {
 function CacheUtil:GetFrameTemplate(): Frame
 	local template: Frame? = CacheUtil.CachedFrameTemplate
 	if not template then
-		template = Assets:WaitForChild("LeaderboardTemplate")
+		template = Assets:WaitForChild("UIAssets"):WaitForChild("LeaderboardTemplate")
 		CacheUtil.CachedFrameTemplate = template
 	end
 	return template:Clone()
@@ -357,6 +357,7 @@ function LeaderboardService.onServerStart()
 				if TopTextLabel then
 					local statColor = Leaderboards.StatColours[statLeaderboard.Name] or Color3.fromRGB(255, 255, 255)
 					TopTextLabel.BackgroundColor3 = statColor
+					TopTextLabel.Text = statLeaderboard.Name
 				end
 			end
 		end

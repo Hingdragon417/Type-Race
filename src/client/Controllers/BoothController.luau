@@ -8,11 +8,7 @@ local BoothController = Knit.CreateController({
     currentIndex = 1,
     typingConnection = nil,
     errorCount = 0,
-    startTime = 0,
-    correctWordCount = 0,
-    totalCharactersTyped = 0,
-    lastTypeTime = 0,
-    wpmUpdateLoop = nil,
+    gameActive = false,
 })
 
 function BoothController:UpdateCamera(boothModel)
@@ -86,6 +82,30 @@ function BoothController:HideStatusLabel()
     end
 end
 
+function BoothController:ShowFeedback(isCorrect: boolean)
+    local statusLabel = self:FindStatusLabel()
+    if not statusLabel then return end
+    
+    statusLabel.Visible = true
+    statusLabel.Text = isCorrect and "Correct" or "Incorrect"
+    statusLabel.TextColor3 = isCorrect and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+    
+    local SoundService = game:GetService("SoundService")
+    local soundsFolder = SoundService:FindFirstChild("Sounds")
+    if soundsFolder then
+        local soundName = isCorrect and "Correct" or "Incorrect"
+        local sound = soundsFolder:FindFirstChild(soundName)
+        if sound and sound:IsA("Sound") then
+            sound:Play()
+        end
+    end
+    
+    task.delay(0.5, function()
+        statusLabel.Visible = false
+        statusLabel.TextColor3 = Color3.fromRGB(255, 251, 0)
+    end)
+end
+
 function BoothController:ShowStartCountdown(seconds)
     seconds = seconds or 5
     self._countdownCancel = false
@@ -119,23 +139,84 @@ function BoothController:ShowStartCountdown(seconds)
     task.wait(0.6)
     statusLabel.Visible = false
     self._countdownCancel = false
-    
-    self:SetJumpAbility(false)
 end
 
-function BoothController:UpdatePreviewColors(preview)
+function BoothController:UpdateOpponentProgress(opponentUserId, progress)
+    local screenGui = self:GetScreenGui()
+    if not screenGui then return end
+    
+    local typingGui = screenGui:FindFirstChild("TypingGame")
+    if not typingGui or not typingGui.Visible then return end
+    
+    local bar = typingGui:WaitForChild("Bar")
+    if not bar then return end
+    
+    local playerTemplate = bar:FindFirstChild("PlayerTemplate")
+    if not playerTemplate or not playerTemplate:IsA("ImageLabel") then return end
+    
+    playerTemplate.Image = "rbxthumb://type=AvatarHeadShot&id=" .. opponentUserId .. "&w=150&h=150"
+    
+    local barSize = bar.AbsoluteSize.X
+    local targetX = progress * barSize
+    
+    local TweenService = game:GetService("TweenService")
+    local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = TweenService:Create(playerTemplate, tweenInfo, {
+        Position = UDim2.new(0, targetX, playerTemplate.Position.Y.Scale, playerTemplate.Position.Y.Offset)
+    })
+    tween:Play()
+end
+
+function BoothController:UpdateProgressBar(typingGui)
+    if not typingGui then return end
+    
+    local bar = typingGui:FindFirstChild("Bar")
+    if not bar then return end
+    
+    local fill = bar:FindFirstChild("Fill")
+    if not fill then return end
+    
+    local progress = (self.currentIndex - 1) / #self.currentWords
+    progress = math.clamp(progress, 0, 1)
+    
+    local TweenService = game:GetService("TweenService")
+    local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = TweenService:Create(fill, tweenInfo, {Size = UDim2.new(progress, 0, 1, 0)})
+    tween:Play()
+end
+
+function BoothController:UpdatePreviewColors(preview, currentTyping)
     if not preview then 
         warn("Preview is nil")
         return 
     end
     
+    currentTyping = currentTyping or ""
     local displayCount = math.min(35, #self.currentWords)
     local newText = ""
     
     for i = 1, displayCount do
         local word = self.currentWords[i]
+        
         if i < self.currentIndex then
             newText = newText .. '<font color="#00FF00">' .. word .. '</font>'
+        elseif i == self.currentIndex and #currentTyping > 0 then
+            local matchLength = 0
+            for j = 1, math.min(#currentTyping, #word) do
+                if string.sub(currentTyping, j, j) == string.sub(word, j, j) then
+                    matchLength = j
+                else
+                    break
+                end
+            end
+            
+            if matchLength > 0 then
+                local yellowChars = string.sub(word, 1, matchLength)
+                local remainingChars = string.sub(word, matchLength + 1)
+                newText = newText .. '<font color="rgb(255,255,0)">' .. yellowChars .. '</font>' .. remainingChars
+            else
+                newText = newText .. word
+            end
         else
             newText = newText .. word
         end
@@ -161,49 +242,6 @@ function BoothController:ShakeTextBox(textBox)
     end)
 end
 
-function BoothController:CalculateWPM(): number
-    local elapsedMinutes = (tick() - self.startTime) / 60
-    if elapsedMinutes <= 0 then
-        return 0
-    end
-    
-    local timeSinceLastType = tick() - self.lastTypeTime
-    local decayFactor = 1
-    
-    if timeSinceLastType > 1 then
-        decayFactor = math.max(0.5, 1 - (timeSinceLastType - 1) * 0.1)
-    end
-    
-    local wordsTyped = self.correctWordCount
-    local baseWPM = wordsTyped / elapsedMinutes
-    
-    return math.floor(baseWPM * decayFactor)
-end
-
-function BoothController:StartWPMUpdater(typingGui)
-    if self.wpmUpdateLoop then
-        task.cancel(self.wpmUpdateLoop)
-    end
-    
-    self.wpmUpdateLoop = task.spawn(function()
-        while true do
-            local wpmLabel = typingGui:FindFirstChild("WPM")
-            if wpmLabel then
-                local wpm = self:CalculateWPM()
-                wpmLabel.Text = "WPM: " .. wpm
-            end
-            task.wait(0.1)
-        end
-    end)
-end
-
-function BoothController:StopWPMUpdater()
-    if self.wpmUpdateLoop then
-        task.cancel(self.wpmUpdateLoop)
-        self.wpmUpdateLoop = nil
-    end
-end
-
 function BoothController:SetupTypingInput(typingGui, preview)
     local textBox = typingGui:FindFirstChild("TextBox")
     if not textBox or not textBox:IsA("TextBox") then return end
@@ -215,22 +253,11 @@ function BoothController:SetupTypingInput(typingGui, preview)
     local lastTextLength = 0
     
     self.typingConnection = textBox:GetPropertyChangedSignal("Text"):Connect(function()
-        local text = textBox.Text
-        local currentLength = #text
-        
-        if currentLength > lastTextLength then
-            self.totalCharactersTyped = self.totalCharactersTyped + (currentLength - lastTextLength)
-            self.lastTypeTime = tick()
-            
-            local soundService = game:GetService("SoundService")
-            local soundsFolder = soundService:FindFirstChild("Sounds")
-            if soundsFolder then
-                local typeSound = soundsFolder:FindFirstChild("Type")
-                if typeSound and typeSound:IsA("Sound") then
-                    typeSound:Play()
-                end
-            end
+        if not self.gameActive then
+            return
         end
+        
+        local text = textBox.Text
         
         if self.currentIndex <= #self.currentWords then
             local expectedWord = self.currentWords[self.currentIndex]
@@ -242,21 +269,35 @@ function BoothController:SetupTypingInput(typingGui, preview)
                 textBox.TextColor3 = Color3.fromRGB(255, 0, 0)
             end
             
+            self:UpdatePreviewColors(preview, text)
+            
             if text == expectedWord then
                 if self.currentIndex == #self.currentWords then
+                    self.BoothService.ValidateWordCompletion:Fire(self.currentIndex, expectedWord)
+                    
                     self.currentIndex = self.currentIndex + 1
-                    self.correctWordCount = self.correctWordCount + 1
                     textBox.Text = ""
                     textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
                     lastTextLength = 0
-                    self:UpdatePreviewColors(preview)
+                    self:UpdatePreviewColors(preview, "")
+                    self:UpdateProgressBar(typingGui)
+                    
+                    self.gameActive = false
+                    local screenGui = self:GetScreenGui()
+                    if screenGui then
+                        local typingGui = screenGui:FindFirstChild("TypingGame")
+                        if typingGui then
+                            typingGui.Visible = false
+                        end
+                    end
+                    
                     self.BoothService.PlayerWon:Fire()
                     return
                 end
             end
         end
         
-        lastTextLength = currentLength
+        lastTextLength = #text
         
         if string.sub(text, -1) == " " then
             local typedWord = string.sub(text, 1, -2)
@@ -265,23 +306,37 @@ function BoothController:SetupTypingInput(typingGui, preview)
                 local expectedWord = self.currentWords[self.currentIndex]
                 
                 if typedWord == expectedWord then
+                    self.BoothService.ValidateWordCompletion:Fire(self.currentIndex, expectedWord)
+                    
                     self.currentIndex = self.currentIndex + 1
-                    self.correctWordCount = self.correctWordCount + 1
                     textBox.Text = ""
                     textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
                     lastTextLength = 0
-                    self:UpdatePreviewColors(preview)
+                    self:UpdatePreviewColors(preview, "")
+                    self:UpdateProgressBar(typingGui)
+                    self:ShowFeedback(true)
                     
                     print("Word completed! Index:", self.currentIndex, "Total words:", #self.currentWords)
                     
                     if self.currentIndex > #self.currentWords then
                         print("YOU WON! Firing PlayerWon signal")
+                        
+                        self.gameActive = false
+                        local screenGui = self:GetScreenGui()
+                        if screenGui then
+                            local typingGui = screenGui:FindFirstChild("TypingGame")
+                            if typingGui then
+                                typingGui.Visible = false
+                            end
+                        end
+                        
                         self.BoothService.PlayerWon:Fire()
                         return
                     end
                 else
                     self.errorCount = self.errorCount + 1
                     self:ShakeTextBox(textBox)
+                    self:ShowFeedback(false)
                     textBox.Text = ""
                     textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
                     lastTextLength = 0
@@ -309,23 +364,15 @@ function BoothController:CreateTypingGame(words)
     self.currentWords = words
     self.currentIndex = 1
     self.errorCount = 0
-    self.correctWordCount = 0
-    self.totalCharactersTyped = 0
-    self.startTime = tick()
-    self.lastTypeTime = tick()
+    self.gameActive = true
     
     preview.RichText = true
     print("Preview RichText enabled:", preview.RichText)
-    self:UpdatePreviewColors(preview)
-    
-    local wpmLabel = typingGui:FindFirstChild("WPM")
-    if wpmLabel then
-        wpmLabel.Text = "WPM: 0"
-    end
+    self:UpdatePreviewColors(preview, "")
+    self:UpdateProgressBar(typingGui)
     
     typingGui.Visible = true
     self:SetupTypingInput(typingGui, preview)
-    self:StartWPMUpdater(typingGui)
     
     local textBox = typingGui:FindFirstChild("TextBox")
     if textBox then
@@ -336,6 +383,30 @@ function BoothController:CreateTypingGame(words)
 end
 
 function BoothController:ShowGameResult(didWin: boolean, winnerName: string)
+    self.gameActive = false
+    
+    local screenGui = self:GetScreenGui()
+    if screenGui then
+        local typingGui = screenGui:FindFirstChild("TypingGame")
+        if typingGui then
+            typingGui.Visible = false
+            
+            local bar = typingGui:FindFirstChild("Bar")
+            if bar then
+                local fill = bar:FindFirstChild("Fill")
+                if fill then
+                    fill.Size = UDim2.new(0, 0, 1, 0)
+                end
+                
+                local playerTemplate = bar:FindFirstChild("PlayerTemplate")
+                if playerTemplate and playerTemplate:IsA("ImageLabel") then
+                    playerTemplate.Image = ""
+                    playerTemplate.Position = UDim2.new(0, 0, playerTemplate.Position.Y.Scale, playerTemplate.Position.Y.Offset)
+                end
+            end
+        end
+    end
+    
     local statusLabel = self:FindStatusLabel()
     if not statusLabel then return end
     
@@ -353,15 +424,6 @@ function BoothController:ShowGameResult(didWin: boolean, winnerName: string)
     statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     
     self:SetJumpAbility(true)
-    self:StopWPMUpdater()
-    
-    local screenGui = self:GetScreenGui()
-    if screenGui then
-        local typingGui = screenGui:FindFirstChild("TypingGame")
-        if typingGui then
-            typingGui.Visible = false
-        end
-    end
 end
 
 function BoothController:KnitStart()
@@ -382,14 +444,11 @@ function BoothController:KnitStart()
                 self.typingConnection:Disconnect()
                 self.typingConnection = nil
             end
-            self:StopWPMUpdater()
+            
             self.currentWords = {}
             self.currentIndex = 1
             self.errorCount = 0
-            self.correctWordCount = 0
-            self.totalCharactersTyped = 0
-            self.startTime = 0
-            self.lastTypeTime = 0
+            self.gameActive = false
         end)
     end
     
@@ -409,6 +468,27 @@ function BoothController:KnitStart()
     if self.BoothService.ShowGameResult then
         self.BoothService.ShowGameResult:Connect(function(didWin, winnerName)
             self:ShowGameResult(didWin, winnerName)
+        end)
+    end
+    
+    if self.BoothService.UpdateWPM then
+        self.BoothService.UpdateWPM:Connect(function(wpm)
+            local screenGui = self:GetScreenGui()
+            if not screenGui then return end
+            
+            local typingGui = screenGui:FindFirstChild("TypingGame")
+            if not typingGui then return end
+            
+            local wpmLabel = typingGui:FindFirstChild("WPM")
+            if wpmLabel and wpmLabel:IsA("TextLabel") then
+                wpmLabel.Text = "WPM: " .. tostring(math.floor(wpm))
+            end
+        end)
+    end
+    
+    if self.BoothService.UpdateOpponentProgress then
+        self.BoothService.UpdateOpponentProgress:Connect(function(opponentUserId, progress)
+            self:UpdateOpponentProgress(opponentUserId, progress)
         end)
     end
 end

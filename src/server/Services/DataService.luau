@@ -13,7 +13,7 @@ local DATA_TEMPLATE = require(Shared.Data.Template)
 local LeaderboardService
 
 local IS_STUDIO = RunService:IsStudio()
-local STORE_NAME = IS_STUDIO and "TESTSTUDIO2111111" or "TESTGAME11111"
+local STORE_NAME = IS_STUDIO and "TESTSTUDIO6432222212212111" or "TESTGAME11111"
 local STORE_VERSION = IS_STUDIO and "1.2.7" or "1.1.0"
 local METADATA_INDEX_VERSION = IS_STUDIO and "STUDIO_DATA_VERSION" or "GAME_DATA_VERSION"
 local SHOULD_SAVE = true
@@ -43,13 +43,8 @@ function DataService:Replicate(player, index)
 
 	if not index then
 		self.Client.ReplicateData:Fire(player, data)
-		for key, value in pairs(data.leaderstats or {}) do
-			if value ~= nil then
-				self.Client.ReplicateData:Fire(player, value, key)
-			end
-		end
 	elseif typeof(index) == "string" then
-		local val = data[index] or (data.leaderstats and data.leaderstats[index])
+		local val = data[index]
 		if val ~= nil then
 			self.Client.ReplicateData:Fire(player, val, index)
 		end
@@ -67,9 +62,14 @@ function DataService:createLeaderstats(player, data)
 	folder.Name = "leaderstats"
 	folder.Parent = player
 
-	local stats = data.leaderstats or {}
+	local statsToShow = {"Winstreak", "Wins"}
+	
+	if not self._updatingLeaderstats then
+		self._updatingLeaderstats = {}
+	end
 
-	for key, value in pairs(stats) do
+	for _, key in ipairs(statsToShow) do
+		local value = data[key]
 		local val = typeof(value) == "number" and Instance.new("IntValue") or typeof(value) == "string" and Instance.new("StringValue")
 		if val then
 			val.Name = key
@@ -77,8 +77,12 @@ function DataService:createLeaderstats(player, data)
 			val.Parent = folder
 
 			val:GetPropertyChangedSignal("Value"):Connect(function()
-				stats[key] = val.Value
-				self:Replicate(player, { "leaderstats", key })
+				if self._updatingLeaderstats[player] and self._updatingLeaderstats[player][key] then
+					return
+				end
+				
+				data[key] = val.Value
+				self:Replicate(player, key)
 				
 				if LeaderboardService and typeof(val.Value) == "number" then
 					LeaderboardService.onPlayerDataChange(player, key, val.Value)
@@ -86,6 +90,25 @@ function DataService:createLeaderstats(player, data)
 			end)
 		end
 	end
+end
+
+function DataService:updateLeaderstats(player, statName, value)
+	local leaderStats = player:FindFirstChild("leaderstats")
+	if not leaderStats then return end
+	
+	if not self._updatingLeaderstats[player] then
+		self._updatingLeaderstats[player] = {}
+	end
+	
+	self._updatingLeaderstats[player][statName] = true
+	
+	local statValue = leaderStats:FindFirstChild(statName)
+	if statValue and (statValue:IsA("IntValue") or statValue:IsA("NumberValue")) then
+		statValue.Value = value
+	end
+	
+	task.wait()
+	self._updatingLeaderstats[player][statName] = false
 end
 
 function DataService:setSession(player, session)
