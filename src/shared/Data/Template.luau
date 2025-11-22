@@ -2,6 +2,8 @@ return {
 	leaderstats = {
 		Coins = 0,
 		Wins = 0,
+		Winstreak = 0,
 	},
-	Inventory = {}
+	KeyboardInventory = {"Default"},
+	EquippedKeyboard = "Default",
 }

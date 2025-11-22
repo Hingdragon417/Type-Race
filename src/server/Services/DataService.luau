@@ -10,8 +10,10 @@ local Signal = require(ReplicatedStorage.Packages.Signal)
 local Shared = ReplicatedStorage.Shared
 local DATA_TEMPLATE = require(Shared.Data.Template)
 
+local LeaderboardService
+
 local IS_STUDIO = RunService:IsStudio()
-local STORE_NAME = IS_STUDIO and "TESTSTUDIO111111" or "TESTGAME11111"
+local STORE_NAME = IS_STUDIO and "TESTSTUDIO2111111" or "TESTGAME11111"
 local STORE_VERSION = IS_STUDIO and "1.2.7" or "1.1.0"
 local METADATA_INDEX_VERSION = IS_STUDIO and "STUDIO_DATA_VERSION" or "GAME_DATA_VERSION"
 local SHOULD_SAVE = true
@@ -77,6 +79,10 @@ function DataService:createLeaderstats(player, data)
 			val:GetPropertyChangedSignal("Value"):Connect(function()
 				stats[key] = val.Value
 				self:Replicate(player, { "leaderstats", key })
+				
+				if LeaderboardService and typeof(val.Value) == "number" then
+					LeaderboardService.onPlayerDataChange(player, key, val.Value)
+				end
 			end)
 		end
 	end
@@ -172,6 +178,8 @@ function DataService:KnitInit()
 	self._store = ProfileStore.New(STORE_NAME, DATA_TEMPLATE)
 	self._cache = {}
 	self._onPlayerRemoving = Signal.new()
+	
+	LeaderboardService = Knit.GetService("LeaderboardService")
 
 	Players.PlayerAdded:Connect(function(player)
 		self.onPlayerAdded(player)
