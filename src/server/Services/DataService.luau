@@ -13,7 +13,7 @@ local DATA_TEMPLATE = require(Shared.Data.Template)
 local LeaderboardService
 
 local IS_STUDIO = RunService:IsStudio()
-local STORE_NAME = IS_STUDIO and "TESTSTUDIO643222222122212111" or "TESTGAME2111211"
+local STORE_NAME = IS_STUDIO and "TESTSTUDIO6432222221222212111" or "TESTGAME2111211"
 local STORE_VERSION = IS_STUDIO and "1.2.7" or "1.1.0"
 local METADATA_INDEX_VERSION = IS_STUDIO and "STUDIO_DATA_VERSION" or "GAME_DATA_VERSION"
 local SHOULD_SAVE = true
@@ -77,15 +77,21 @@ function DataService:createLeaderstats(player, data)
 			val.Parent = folder
 
 			val:GetPropertyChangedSignal("Value"):Connect(function()
-				if self._updatingLeaderstats[player] and self._updatingLeaderstats[player][key] then
-					return
+				print("[DataService] Leaderstats changed:", player.Name, key, val.Value)
+				
+				local isUpdating = self._updatingLeaderstats[player] and self._updatingLeaderstats[player][key]
+				print("[DataService] Is updating flag set?", isUpdating)
+				
+				if not isUpdating then
+					data[key] = val.Value
+					self:Replicate(player, key)
 				end
 				
-				data[key] = val.Value
-				self:Replicate(player, key)
-				
 				if LeaderboardService and typeof(val.Value) == "number" then
+					print("[DataService] Calling LeaderboardService.onPlayerDataChange")
 					LeaderboardService.onPlayerDataChange(player, key, val.Value)
+				else
+					print("[DataService] LeaderboardService not available or value not number")
 				end
 			end)
 		end
@@ -93,22 +99,31 @@ function DataService:createLeaderstats(player, data)
 end
 
 function DataService:updateLeaderstats(player, statName, value)
+	print("[DataService] updateLeaderstats called:", player.Name, statName, value)
 	local leaderStats = player:FindFirstChild("leaderstats")
-	if not leaderStats then return end
+	if not leaderStats then 
+		print("[DataService] No leaderstats folder found")
+		return 
+	end
 	
 	if not self._updatingLeaderstats[player] then
 		self._updatingLeaderstats[player] = {}
 	end
 	
 	self._updatingLeaderstats[player][statName] = true
+	print("[DataService] Setting _updatingLeaderstats flag for:", player.Name, statName)
 	
 	local statValue = leaderStats:FindFirstChild(statName)
 	if statValue and (statValue:IsA("IntValue") or statValue:IsA("NumberValue")) then
+		print("[DataService] Updating stat value from", statValue.Value, "to", value)
 		statValue.Value = value
+	else
+		print("[DataService] Stat not found or wrong type:", statName)
 	end
 	
 	task.wait()
 	self._updatingLeaderstats[player][statName] = false
+	print("[DataService] Cleared _updatingLeaderstats flag for:", player.Name, statName)
 end
 
 function DataService:setSession(player, session)

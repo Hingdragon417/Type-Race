@@ -21,7 +21,7 @@ local ShopConfig = {
 			DisplayName = "Mini",
 		},
 		XL = {
-			Price = 90,
+			Price = 190,
 			DisplayName = "XL",
 		},
 		Yellow = {

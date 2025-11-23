@@ -24,7 +24,7 @@ function StatsController:UpdateStats(data)
         return
     end
     
-    local highestWinstreakLabel = statContainer:WaitForChild("HighestWinstreak")
+    local highestWinstreakLabel = statContainer:WaitForChild("HighestWinstreak",5)
     if highestWinstreakLabel and highestWinstreakLabel:IsA("TextLabel") then
         highestWinstreakLabel.Text = "Highest Winstreak: " .. tostring(data.HighestWinstreak or 0)
     end

@@ -38,7 +38,7 @@ local Leaderboards = {
 		Wins = Color3.fromRGB(42, 126, 194),
 	},
 	updateCooldowns = {},
-	cooldownTime = 10,
+	cooldownTime = 3,
 	CachedUi = {},
 	CachedPlayerStatPeaks = {},
 	CachedLeaderboardData = {},
@@ -47,7 +47,7 @@ local Leaderboards = {
 
 local DataModule = {}
 
-local LeaderboardData: DataStore = DataStoreService:GetDataStore("LeaderboardData_TEST6")
+local LeaderboardData: DataStore = DataStoreService:GetDataStore("LeaderboardData_TEST")
 
 function DataModule:GetLeaderboardData(): any
 	local success, data = pcall(function()
@@ -99,7 +99,8 @@ function CacheUtil:GetFrameTemplate(): Frame
 		template = Assets:WaitForChild("UIAssets"):WaitForChild("LeaderboardTemplate")
 		CacheUtil.CachedFrameTemplate = template
 	end
-	return template:Clone()
+	local clonedTemplate = template:Clone()
+	return clonedTemplate
 end
 
 function CacheUtil:isValueWorthy(player: Player, statName: string, value: number): boolean
@@ -364,15 +365,20 @@ function LeaderboardService.onServerStart()
 	end
 
 	Players.PlayerAdded:Connect(function(player: Player)
+		print("[LeaderboardService] Player joined:", player.Name)
 		local session = DataService.waitForSession(player)
 		if not session or not session.Data then
+			print("[LeaderboardService] No session data for player:", player.Name)
 			return
 		end
+		print("[LeaderboardService] Session data found for:", player.Name)
 
 		for _, statName in ipairs(Leaderboards.SavedStats) do
 			local playerStatValue = session.Data[statName]
-			if playerStatValue and type(playerStatValue) == "number" then
+			print("[LeaderboardService] Player", player.Name, "stat", statName, "=", playerStatValue)
+			if playerStatValue and type(playerStatValue) == "number" and playerStatValue > 0 then
 				Leaderboards:ValidatePlayerStatPeak(player, statName, playerStatValue)
+				LeaderboardService.onPlayerDataChange(player, statName, playerStatValue)
 			end
 		end
 	end)
@@ -386,8 +392,9 @@ function LeaderboardService.onServerStart()
 
 		for _, statName in ipairs(Leaderboards.SavedStats) do
 			local playerStatValue = session.Data[statName]
-			if playerStatValue and type(playerStatValue) == "number" then
+			if playerStatValue and type(playerStatValue) == "number" and playerStatValue > 0 then
 				Leaderboards:ValidatePlayerStatPeak(player, statName, playerStatValue)
+				LeaderboardService.onPlayerDataChange(player, statName, playerStatValue)
 			end
 		end
 	end
@@ -451,19 +458,25 @@ function LeaderboardService.onServerStart()
 end
 
 function LeaderboardService.onPlayerDataChange(player: Player, statName: string, newValue: number)
+	print("[LeaderboardService] onPlayerDataChange:", player.Name, statName, newValue)
 	if not table.find(Leaderboards.SavedStats, statName) then
+		print("[LeaderboardService] Stat not tracked:", statName)
 		return
 	end
 
 	local s: boolean = Leaderboards:ValidatePlayerStatPeak(player, statName, newValue)
 	if not s then
+		print("[LeaderboardService] Not a new peak for:", player.Name, statName)
 		return
 	end
+	print("[LeaderboardService] New peak validated for:", player.Name, statName, newValue)
 
 	local worthy: boolean = CacheUtil:isValueWorthy(player, statName, newValue)
 	if not worthy then
+		print("[LeaderboardService] Value not worthy:", player.Name, statName, newValue)
 		return
 	end
+	print("[LeaderboardService] Value is worthy:", player.Name, statName, newValue)
 
 	local activePlayerCooldown = Leaderboards.updateCooldowns[player.UserId] and Leaderboards.updateCooldowns[player.UserId][statName]
 	if activePlayerCooldown then
@@ -496,9 +509,11 @@ function LeaderboardService.onPlayerLeaderboardDataChanged(player: Player, statN
 
 	local isOnLeaderboard, existingIndex = CacheUtil:isPlayerOnLeaderboard(player.UserId, statName)
 	if isOnLeaderboard and existingIndex then
-		statEntries[playerEntryIndex] = { player.UserId, newValue }
+		-- Update existing entry
+		statEntries[existingIndex] = { player.UserId, newValue }
 	else
-		if #statEntries+1 > Leaderboards.maxEntries then
+		-- Add new entry
+		if #statEntries >= Leaderboards.maxEntries then
 			table.remove(statEntries, #statEntries)
 		end
 		table.insert(statEntries, playerEntryIndex, { player.UserId, newValue })

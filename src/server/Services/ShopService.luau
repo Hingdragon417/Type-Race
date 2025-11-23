@@ -1,12 +1,13 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataStoreService = game:GetService("DataStoreService")
+local TweenService = game:GetService("TweenService")
 
 local Packages = ReplicatedStorage.Packages
 
 local Knit = require(Packages.Knit)
 local ShopConfig = require(script.Parent.Parent.ShopConfig)
 
-local ShopDataStore = DataStoreService:GetDataStore("ShopRotation_V1")
+local ShopDataStore = DataStoreService:GetDataStore("ShopRotation_V2")
 local ROTATION_INTERVAL = 3 * 60 * 60 -- 3 hours in seconds
 local SHOP_STOCK_COUNT = 3
 
@@ -17,6 +18,9 @@ local ShopService = Knit.CreateService({
 
 local currentStock = {}
 local nextRotationTime = 0
+local DataService
+local QuestService
+local bobTweens = {}
 
 local function getAvailableKeyboards()
     local keyboards = {}
@@ -79,6 +83,13 @@ local function loadOrCreateStock()
 end
 
 local function clearSpawnedKeyboards()
+    for _, tween in ipairs(bobTweens) do
+        if tween then
+            tween:Cancel()
+        end
+    end
+    bobTweens = {}
+    
     local shopFolder = workspace:FindFirstChild("Shop")
     if not shopFolder then return end
     
@@ -154,14 +165,161 @@ local function spawnKeyboardsInShop()
         
         clonedKeyboard.Parent = spawn
         
-        local root = clonedKeyboard:FindFirstChild("Root")
-        if root then
+        if not clonedKeyboard.PrimaryPart then
+            local root = clonedKeyboard:FindFirstChild("Root")
+            if root and root:IsA("BasePart") then
+                clonedKeyboard.PrimaryPart = root
+            end
+        end
+        
+        if clonedKeyboard.PrimaryPart then
+            -- Weld all parts to the PrimaryPart
+            for _, descendant in ipairs(clonedKeyboard:GetDescendants()) do
+                if descendant:IsA("BasePart") and descendant ~= clonedKeyboard.PrimaryPart then
+                    descendant.Anchored = false
+                    local weld = Instance.new("WeldConstraint")
+                    weld.Part0 = clonedKeyboard.PrimaryPart
+                    weld.Part1 = descendant
+                    weld.Parent = clonedKeyboard.PrimaryPart
+                end
+            end
+            
+            local bobHeight = 0.3
+            local bobSpeed = 2
+            local baseCFrame = clonedKeyboard.PrimaryPart.CFrame
+            
+            local bobDown, bobUp
+            local currentUpTween, currentDownTween
+            local isBobbing = true
+            
+            bobUp = function()
+                if not isBobbing then return end
+                currentUpTween = TweenService:Create(
+                    clonedKeyboard.PrimaryPart,
+                    TweenInfo.new(bobSpeed, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                    {CFrame = baseCFrame + Vector3.new(0, bobHeight, 0)}
+                )
+                currentUpTween.Completed:Connect(function()
+                    bobDown()
+                end)
+                currentUpTween:Play()
+                table.insert(bobTweens, currentUpTween)
+            end
+            
+            bobDown = function()
+                if not isBobbing then return end
+                currentDownTween = TweenService:Create(
+                    clonedKeyboard.PrimaryPart,
+                    TweenInfo.new(bobSpeed, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                    {CFrame = baseCFrame}
+                )
+                currentDownTween.Completed:Connect(function()
+                    bobUp()
+                end)
+                currentDownTween:Play()
+                table.insert(bobTweens, currentDownTween)
+            end
+            
+            bobUp()
+            
             local proximityPrompt = Instance.new("ProximityPrompt")
             proximityPrompt.ActionText = "Buy"
             proximityPrompt.ObjectText = keyboardData.DisplayName
             proximityPrompt.MaxActivationDistance = 10
             proximityPrompt.RequiresLineOfSight = false
-            proximityPrompt.Parent = root
+            proximityPrompt.Parent = clonedKeyboard.PrimaryPart
+            
+            proximityPrompt.Triggered:Connect(function(player)
+                local session = DataService:getSession(player)
+                if not session or not session.Data then
+                    return
+                end
+                
+                local playerCoins = session.Data.Coins or 0
+                local price = keyboardData.Price
+                
+                if playerCoins >= price then
+                    session.Data.Coins = playerCoins - price
+                    
+                    if not session.Data.KeyboardInventory then
+                        session.Data.KeyboardInventory = {}
+                    end
+                    
+                    if not table.find(session.Data.KeyboardInventory, keyboardData.Name) then
+                        table.insert(session.Data.KeyboardInventory, keyboardData.Name)
+                    end
+                    
+                    DataService:Replicate(player, "Coins")
+                    DataService:Replicate(player, "KeyboardInventory")
+                    
+                    -- Track keyboard purchase for quest
+                    if QuestService then
+                        QuestService:TrackKeyboardPurchase(player)
+                    end
+                    
+                    -- Play purchase sound
+                    local soundsFolder = game:GetService("SoundService"):FindFirstChild("Sounds")
+                    if soundsFolder then
+                        local purchaseSound = soundsFolder:FindFirstChild("Purchase")
+                        if purchaseSound and purchaseSound:IsA("Sound") then
+                            purchaseSound:Play()
+                        end
+                    end
+                    
+                    -- Emit confetti from player
+                    local character = player.Character
+                    if character then
+                        local hrp = character:FindFirstChild("HumanoidRootPart")
+                        local assetsFolder = game.ReplicatedStorage:FindFirstChild("Assets")
+                        local confettiFolder = assetsFolder and assetsFolder:FindFirstChild("Confetti")
+                        
+                        if hrp and confettiFolder then
+                            for _, emitter in pairs(confettiFolder:GetChildren()) do
+                                if emitter:IsA("ParticleEmitter") then
+                                    local clonedEmitter = emitter:Clone()
+                                    clonedEmitter.Parent = hrp
+                                    clonedEmitter:Emit(clonedEmitter:GetAttribute("EmitCount") or 20)
+                                    task.delay(1, function()
+                                        clonedEmitter:Destroy()
+                                    end)
+                                end
+                            end
+                        end
+                    end
+                    
+                    -- Stop bobbing
+                    isBobbing = false
+                    if currentUpTween then currentUpTween:Cancel() end
+                    if currentDownTween then currentDownTween:Cancel() end
+                    
+                    -- Spin animation - do 4x 90 degree rotations to complete a full spin
+                    local startCFrame = clonedKeyboard.PrimaryPart.CFrame
+                    
+                    local function doSpin(rotations, currentRotation)
+                        if currentRotation > rotations then
+                            baseCFrame = clonedKeyboard.PrimaryPart.CFrame
+                            isBobbing = true
+                            bobUp()
+                            return
+                        end
+                        
+                        local currentCF = clonedKeyboard.PrimaryPart.CFrame
+                        local spinTween = TweenService:Create(
+                            clonedKeyboard.PrimaryPart,
+                            TweenInfo.new(0.125, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut),
+                            {CFrame = currentCF * CFrame.Angles(math.rad(90), 0, 0)}
+                        )
+                        spinTween.Completed:Connect(function()
+                            doSpin(rotations, currentRotation + 1)
+                        end)
+                        spinTween:Play()
+                    end
+                    
+                    doSpin(4, 1)
+                else
+                    print("[ShopService] Not enough coins")
+                end
+            end)
         end
         
         local display = clonedKeyboard:FindFirstChild("Display")
@@ -238,8 +396,9 @@ function ShopService:KnitStart()
     end)
 end
 
-function ShopService:KnitInit() 
-
+function ShopService:KnitInit()
+    DataService = Knit.GetService("DataService")
+    QuestService = Knit.GetService("QuestService")
 end
 
 return ShopService

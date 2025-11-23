@@ -15,7 +15,10 @@ local COIN_PRODUCTS = {
     [3462331296] = 1000, -- 1000 coins
 }
 
+local WINSTREAK_SAVE_PRODUCT = 3462811274
+
 local DataService
+local pendingWinstreakRestores = {}
 
 local TypewriterShopService = Knit.CreateService({
     Name = "TypewriterShopService",
@@ -66,7 +69,10 @@ function TypewriterShopService:grantCoins(player, amount)
         return false
     end
     
-    session.Data.Coins = session.Data.Coins + amount
+    print("[TypewriterShopService] Granting", amount, "coins to", player.Name)
+    print("[TypewriterShopService] Current coins:", session.Data.Coins)
+    session.Data.Coins = (session.Data.Coins or 0) + amount
+    print("[TypewriterShopService] New coins:", session.Data.Coins)
     DataService:Replicate(player, "Coins")
     
     return true
@@ -128,29 +134,57 @@ function TypewriterShopService:checkAndGrantGamepass(player)
 end
 
 function TypewriterShopService:processReceipt(receiptInfo)
+    print("[TypewriterShopService] ProcessReceipt called for product:", receiptInfo.ProductId)
     local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
     
     if not player then
-        -- Player left before receipt was processed
+        print("[TypewriterShopService] Player not found")
         return Enum.ProductPurchaseDecision.NotProcessedYet
     end
     
+    print("[TypewriterShopService] Player found:", player.Name)
     local productId = receiptInfo.ProductId
-    local coinAmount = COIN_PRODUCTS[productId]
     
-    if not coinAmount then
-        -- Unknown product
+    -- Handle winstreak save product
+    if productId == WINSTREAK_SAVE_PRODUCT then
+        print("[TypewriterShopService] Winstreak save product detected")
+        local previousWinstreak = pendingWinstreakRestores[player.UserId]
+        if previousWinstreak then
+            local session = DataService:getSession(player)
+            if session and session.Data then
+                print("[TypewriterShopService] Restoring winstreak:", previousWinstreak)
+                session.Data.Winstreak = previousWinstreak
+                DataService:updateLeaderstats(player, "Winstreak", previousWinstreak)
+                pendingWinstreakRestores[player.UserId] = nil
+                return Enum.ProductPurchaseDecision.PurchaseGranted
+            end
+        end
+        print("[TypewriterShopService] No pending winstreak restore found")
         return Enum.ProductPurchaseDecision.NotProcessedYet
     end
     
-    -- Grant coins
+    -- Handle coin products
+    local coinAmount = COIN_PRODUCTS[productId]
+    if not coinAmount then
+        print("[TypewriterShopService] Unknown product ID")
+        return Enum.ProductPurchaseDecision.NotProcessedYet
+    end
+    
+    print("[TypewriterShopService] Coin amount:", coinAmount)
     local success = self:grantCoins(player, coinAmount)
     
     if success then
+        print("[TypewriterShopService] Purchase granted")
         return Enum.ProductPurchaseDecision.PurchaseGranted
     else
+        print("[TypewriterShopService] Purchase failed")
         return Enum.ProductPurchaseDecision.NotProcessedYet
     end
+end
+
+function TypewriterShopService:registerWinstreakRestore(userId, winstreakValue)
+    print("[TypewriterShopService] Registering winstreak restore for user:", userId, "value:", winstreakValue)
+    pendingWinstreakRestores[userId] = winstreakValue
 end
 
 function TypewriterShopService.Client:GetTypewriterStock(player)

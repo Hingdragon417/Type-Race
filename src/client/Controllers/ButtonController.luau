@@ -90,6 +90,48 @@ function ButtonController:TweenElement(element : GuiObject, targetScale : number
 end
 
 local currentFrame : Frame
+local previousFrame : Frame
+
+function ButtonController:HideFrame(frame)
+    if frameTweens[frame] then
+        frameTweens[frame]:Cancel()
+        frameTweens[frame] = nil
+    end
+    
+    local uiScale = frame:FindFirstChildWhichIsA("UIScale") or Instance.new("UIScale", frame)
+    
+    if not frame.Visible and uiScale.Scale <= 0 then
+        return nil
+    end
+    
+    frame.Visible = true
+    
+    if uiScale.Scale <= 0 then
+        uiScale.Scale = 1
+    end
+    
+    local tweenInfo = TweenInfo.new(hoverTweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    local tween = TweenService:Create(uiScale, tweenInfo, {Scale = 0})
+    
+    frameTweens[frame] = tween
+    
+    tween.Completed:Connect(function()
+        frame.Visible = false
+        if frameTweens[frame] == tween then
+            frameTweens[frame] = nil
+        end
+    end)
+    
+    tween:Play()
+    
+    -- Clear currentFrame if it's the frame being hidden
+    if currentFrame == frame then
+        previousFrame = currentFrame
+        currentFrame = nil
+    end
+    
+    return tween
+end
 
 local isDebounce = false
 
@@ -375,6 +417,13 @@ function ButtonController:KnitStart()
                 
                 buttonConnections[descendant].MouseButton1Click = descendant.MouseButton1Click:Connect(function()
                     self:ClickedButtonTween(descendant)
+                    
+                    if CollectionService:HasTag(descendant, "Close") then
+                        local parentFrame = descendant:FindFirstAncestorOfClass("Frame")
+                        if parentFrame then
+                            self:HideFrame(parentFrame)
+                        end
+                    end
                 end)
             end
         end
@@ -419,6 +468,13 @@ function ButtonController:KnitStart()
             
             buttonConnections[button].MouseButton1Click = button.MouseButton1Click:Connect(function()
                 self:ClickedButtonTween(button)
+                
+                if CollectionService:HasTag(button, "Close") then
+                    local parentFrame = button:FindFirstAncestorOfClass("Frame")
+                    if parentFrame then
+                        self:HideFrame(parentFrame)
+                    end
+                end
             end)
         end
     end

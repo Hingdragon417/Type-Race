@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local Packages = ReplicatedStorage.Packages
 local Knit = require(Packages.Knit)
@@ -37,6 +38,8 @@ local playerTypingStats = {}
 local wpmUpdateLoops = {}
 local _hasPlayerWon = {}
 local DataService
+local TypewriterShopService
+local QuestService
 
 local function isPlayerInBooth(player: Player): boolean
     return activeBooths[player] ~= nil
@@ -198,10 +201,33 @@ local function updatePlayerStats(player: Player, won: boolean, averageWPM: numbe
         if data.Winstreak > (data.HighestWinstreak or 0) then
             data.HighestWinstreak = data.Winstreak
         end
+        
+        -- Track quest progress
+        if QuestService then
+            QuestService:TrackWin(player)
+            QuestService:TrackWinStreak(player, data.Winstreak)
+        end
     else
         data.Coins = (data.Coins or 0) + 10
         data.Losses = (data.Losses or 0) + 1
-        data.Winstreak = 0
+        
+        local previousWinstreak = data.Winstreak or 0
+        if previousWinstreak > 0 then
+            if TypewriterShopService then
+                TypewriterShopService:registerWinstreakRestore(player.UserId, previousWinstreak)
+            end
+            data.Winstreak = 0
+            
+            local success, result = pcall(function()
+                MarketplaceService:PromptProductPurchase(player, 3462811274)
+            end)
+            
+            if not success then
+                warn("Failed to prompt product purchase:", result)
+            end
+        else
+            data.Winstreak = 0
+        end
     end
     
     data.WPM = math.floor(averageWPM)
@@ -232,6 +258,14 @@ local function endGameWithWinner(boothModel: Model, winner: Player)
         local wpm = playerWPM[player] or 0
         local won = player == winner
         updatePlayerStats(player, won, wpm)
+        
+        -- Track perfect game (0 errors) for winner
+        if won and QuestService then
+            local errors = playerErrors[player] or 0
+            if errors == 0 then
+                QuestService:TrackPerfectGame(player)
+            end
+        end
         
         if player == winner then
             BoothService.Client.ShowGameResult:Fire(player, true, winner.Name)
@@ -528,6 +562,9 @@ local function setupBoothListeners(boothModel: Model)
 end
 
 function BoothService:KnitStart()
+    TypewriterShopService = Knit.GetService("TypewriterShopService")
+    QuestService = Knit.GetService("QuestService")
+    
     local boothsFolder = game.Workspace:WaitForChild("BoothsFolder")
     local boothModels = boothsFolder:GetChildren()
     
@@ -630,6 +667,11 @@ function BoothService:KnitStart()
             
             local currentWPM = calculateWPM(player, boothModel)
             playerWPM[player] = currentWPM
+        end
+        
+        -- Track word typed for quest
+        if QuestService then
+            QuestService:TrackWordTyped(player)
         end
         
         playerWordsCompleted[player] = (playerWordsCompleted[player] or 0) + 1

@@ -307,7 +307,7 @@ function BoothController:SetupTypingInput(typingGui, preview)
         lastTextLength = #text
         
         if string.sub(text, -1) == " " then
-            local typedWord = string.sub(text, 1, -2)
+            local typedWord = string.gsub(string.sub(text, 1, -2), " ", "")
             
             if self.currentIndex <= #self.currentWords then
                 local expectedWord = self.currentWords[self.currentIndex]
@@ -345,6 +345,11 @@ function BoothController:SetupTypingInput(typingGui, preview)
                     textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
                     lastTextLength = 0
                     
+                    local errorsLabel = typingGui:FindFirstChild("Errors")
+                    if errorsLabel and errorsLabel:IsA("TextLabel") then
+                        errorsLabel.Text = "Errors " .. tostring(self.errorCount) .. "/5"
+                    end
+                    
                     self.BoothService.PlayerLost:Fire()
                 end
             end
@@ -368,6 +373,11 @@ function BoothController:CreateTypingGame(words)
     self.currentIndex = 1
     self.errorCount = 0
     self.gameActive = true
+    
+    local errorsLabel = typingGui:FindFirstChild("Errors")
+    if errorsLabel and errorsLabel:IsA("TextLabel") then
+        errorsLabel.Text = "Errors 0/5"
+    end
     
     preview.RichText = true
     self:UpdatePreviewColors(preview, "")
