@@ -9,9 +9,54 @@ local BoothController = Knit.CreateController({
     typingConnection = nil,
     errorCount = 0,
     gameActive = false,
+    currentBooth = nil,
+    hiddenBillboards = {},
 })
 
+function BoothController:HideOtherBoothBillboards(currentBoothModel)
+    -- Clear previous hidden billboards
+    for _, billboard in ipairs(self.hiddenBillboards) do
+        if billboard and billboard.Parent then
+            billboard.Enabled = true
+        end
+    end
+    self.hiddenBillboards = {}
+    
+    -- Hide all billboards except the current booth
+    for _, descendant in ipairs(workspace:GetDescendants()) do
+        if descendant:IsA("BillboardGui") then
+            -- Check if this billboard is not in the current booth
+            local isInCurrentBooth = false
+            local parent = descendant.Parent
+            while parent do
+                if parent == currentBoothModel then
+                    isInCurrentBooth = true
+                    break
+                end
+                parent = parent.Parent
+            end
+            
+            if not isInCurrentBooth and descendant.Enabled then
+                descendant.Enabled = false
+                table.insert(self.hiddenBillboards, descendant)
+            end
+        end
+    end
+end
+
+function BoothController:ShowAllBillboards()
+    for _, billboard in ipairs(self.hiddenBillboards) do
+        if billboard and billboard.Parent then
+            billboard.Enabled = true
+        end
+    end
+    self.hiddenBillboards = {}
+end
+
 function BoothController:UpdateCamera(boothModel)
+    self.currentBooth = boothModel
+    self:HideOtherBoothBillboards(boothModel)
+    
     local camera = workspace.CurrentCamera
     local camPart = boothModel:FindFirstChild("Camera")
     if camPart then
@@ -21,6 +66,8 @@ function BoothController:UpdateCamera(boothModel)
 end
 
 function BoothController:RevertCamera()
+    self.currentBooth = nil
+    self:ShowAllBillboards()
     workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
 end
 

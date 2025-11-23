@@ -7,8 +7,8 @@ local Packages = ReplicatedStorage.Packages
 local Knit = require(Packages.Knit)
 local ShopConfig = require(script.Parent.Parent.ShopConfig)
 
-local ShopDataStore = DataStoreService:GetDataStore("ShopRotation_V2")
-local ROTATION_INTERVAL = 3 * 60 * 60 -- 3 hours in seconds
+local ShopDataStore = DataStoreService:GetDataStore("ShopRotation_V3")
+local ROTATION_INTERVAL = 900 -- 15 minutes in seconds
 local SHOP_STOCK_COUNT = 3
 
 local ShopService = Knit.CreateService({

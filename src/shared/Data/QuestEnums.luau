@@ -1,8 +1,8 @@
 return {
-	["Win a Game and Emote"] = {
+	["Play for 5 Minutes"] = {
 		Type = "Typing",
-		Description = "Win a typing game and then use an emote",
-		Goal = 1,
+		Description = "Play for 5 minutes",
+		Goal = 300,
 		Reward = 150,
 		RewardType = "Coins",
 	},
@@ -10,21 +10,21 @@ return {
 		Type = "Typing",
 		Description = "Win 5 typing games",
 		Goal = 5,
-		Reward = 200,
+		Reward = 100,
 		RewardType = "Coins",
 	},
 	["Type 500 Words"] = {
 		Type = "Typing",
 		Description = "Type 500 words correctly",
 		Goal = 500,
-		Reward = 250,
+		Reward = 199,
 		RewardType = "Coins",
 	},
 	["Earn 3 Win Streak"] = {
 		Type = "Typing",
 		Description = "Get a win streak of 3",
 		Goal = 3,
-		Reward = 300,
+		Reward = 150,
 		RewardType = "Coins",
 	},
 	["Complete Without Errors"] = {

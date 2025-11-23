@@ -65,6 +65,12 @@ local function updateQuestDisplay()
                         progressLabel.Text = string.format("%d/%d", current, goal)
                     end
                     
+                    -- Update "Reward" with coin amount
+                    local rewardLabel = questFrame:FindFirstChild("Reward")
+                    if rewardLabel and rewardLabel:IsA("TextLabel") then
+                        rewardLabel.Text = string.format("+%d Coins", quest.Data.Reward)
+                    end
+                    
                     -- Update Bar -> Filler
                     local bar = questFrame:FindFirstChild("Bar")
                     if bar then

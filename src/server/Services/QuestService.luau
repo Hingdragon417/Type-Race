@@ -18,6 +18,7 @@ local QuestService = Knit.CreateService({
 local RESET_INTERVAL = 1800 -- 30 minutes in seconds
 local DataService
 local completedQuests = {}
+local playerJoinTimes = {}
 
 local function getQuestsByType(questType)
     local quests = {}
@@ -44,35 +45,9 @@ function QuestService:TrackWin(player: Player)
     if not session or not session.Data or not session.Data.ActiveQuests then return end
     
     for _, questName in ipairs(session.Data.ActiveQuests) do
-        local questData = QuestEnums[questName]
-        if questData and questData.Type == "Typing" then
-            if questName == "Win 5 Games" then
-                self:UpdateProgress(player, questName, 1)
-            elseif questName == "Win a Game and Emote" then
-                -- Mark that they've won, wait for emote
-                if not session.Data._questFlags then
-                    session.Data._questFlags = {}
-                end
-                session.Data._questFlags.hasWonForEmote = true
-            end
-        end
-    end
-end
-
-function QuestService:TrackEmote(player: Player)
-    if not DataService then return end
-    
-    local session = DataService:getSession(player)
-    if not session or not session.Data or not session.Data.ActiveQuests then return end
-    
-    -- Check if they completed a win first
-    if session.Data._questFlags and session.Data._questFlags.hasWonForEmote then
-        for _, questName in ipairs(session.Data.ActiveQuests) do
-            if questName == "Win a Game and Emote" then
-                self:UpdateProgress(player, questName, 1)
-                session.Data._questFlags.hasWonForEmote = false
-                break
-            end
+        if questName == "Win 5 Games" then
+            self:UpdateProgress(player, questName, 1)
+            break
         end
     end
 end
@@ -99,11 +74,27 @@ function QuestService:TrackWinStreak(player: Player, streakAmount: number)
     
     for _, questName in ipairs(session.Data.ActiveQuests) do
         if questName == "Earn 3 Win Streak" then
-            -- Only update if they reached the streak
-            if streakAmount >= 3 then
-                session.Data.QuestProgress = session.Data.QuestProgress or {}
-                if (session.Data.QuestProgress[questName] or 0) < 3 then
-                    self:UpdateProgress(player, questName, 3)
+            -- Update progress based on current streak
+            session.Data.QuestProgress = session.Data.QuestProgress or {}
+            local currentProgress = session.Data.QuestProgress[questName] or 0
+            
+            -- Only update if the new streak is higher than current progress
+            if streakAmount > currentProgress then
+                local progressToSet = math.min(streakAmount, 3)
+                if progressToSet > currentProgress then
+                    -- Set the progress directly instead of incrementing
+                    session.Data.QuestProgress[questName] = progressToSet
+                    self.Client.ProgressUpdated:Fire(player, questName, progressToSet)
+                    
+                    -- Check if quest is complete
+                    if progressToSet >= 3 then
+                        local questData = QuestEnums[questName]
+                        local completionKey = player.UserId .. "_" .. questName
+                        if questData and not completedQuests[completionKey] then
+                            completedQuests[completionKey] = true
+                            self:CompleteQuest(player, questName)
+                        end
+                    end
                 end
             end
             break
@@ -245,8 +236,14 @@ function QuestService:UpdateProgress(player: Player, questName: string, amount: 
         session.Data.QuestProgress = {}
     end
     
+    local questData = QuestEnums[questName]
+    if not questData then return 0 end
+    
     local progress = session.Data.QuestProgress[questName] or 0
     progress = progress + amount
+    
+    -- Clamp progress to the goal
+    progress = math.min(progress, questData.Goal)
     
     session.Data.QuestProgress[questName] = progress
     
@@ -275,7 +272,9 @@ function QuestService:CompleteQuest(player: Player, questName: string)
         if not session.Data.Coins then
             session.Data.Coins = 0
         end
+        print("[QuestService] Completing quest for", player.Name, questName, "Reward:", questData.Reward)
         session.Data.Coins = session.Data.Coins + questData.Reward
+        print("[QuestService] New coin amount:", session.Data.Coins)
         DataService:Replicate(player, "Coins")
     end
 end
@@ -289,6 +288,57 @@ function QuestService.Client:GetPlayerProgress(player: Player)
 end
 
 function QuestService:KnitStart()
+    -- Track player join times
+    Players.PlayerAdded:Connect(function(player)
+        playerJoinTimes[player] = os.time()
+    end)
+    
+    Players.PlayerRemoving:Connect(function(player)
+        playerJoinTimes[player] = nil
+    end)
+    
+    -- Update playtime quest every 10 seconds
+    task.spawn(function()
+        while true do
+            task.wait(10)
+            if DataService then
+                for _, player in Players:GetPlayers() do
+                    local joinTime = playerJoinTimes[player]
+                    if joinTime then
+                        local session = DataService:getSession(player)
+                        if session and session.Data and session.Data.ActiveQuests then
+                            local playTime = os.time() - joinTime
+                            
+                            for _, questName in ipairs(session.Data.ActiveQuests) do
+                                if questName == "Play for 5 Minutes" then
+                                    session.Data.QuestProgress = session.Data.QuestProgress or {}
+                                    local currentProgress = session.Data.QuestProgress[questName] or 0
+                                    
+                                    if playTime > currentProgress and currentProgress < 300 then
+                                        -- Clamp playtime to 300 (5 minutes)
+                                        local clampedPlayTime = math.min(playTime, 300)
+                                        session.Data.QuestProgress[questName] = clampedPlayTime
+                                        self.Client.ProgressUpdated:Fire(player, questName, clampedPlayTime)
+                                        
+                                        if clampedPlayTime >= 300 then
+                                            local questData = QuestEnums[questName]
+                                            local completionKey = player.UserId .. "_" .. questName
+                                            if questData and not completedQuests[completionKey] then
+                                                completedQuests[completionKey] = true
+                                                self:CompleteQuest(player, questName)
+                                            end
+                                        end
+                                    end
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    
     task.spawn(function()
         while true do
             task.wait(30)
