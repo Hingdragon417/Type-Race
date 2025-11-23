@@ -19,8 +19,6 @@ local screenGui = playerGUI:WaitForChild("ScreenGui")
 local leftContainer = screenGui:WaitForChild("LeftContainer")
 local frames : Folder = screenGui:WaitForChild("Frames")
 
-print("[ButtonController] Initialized: LeftContainer found:", leftContainer, "Frames found:", frames)
-
 local startScale = 1
 local hoverScale = 1.1
 local clickedScale = 0.95
@@ -61,7 +59,6 @@ function ButtonController:CleanupButtonConnections()
 end
 
 function ButtonController:TweenElement(element : GuiObject, targetScale : number, duration : number?, easingStyle : Enum.EasingStyle?, easingDirection : Enum.EasingDirection?, doWait : boolean?)
-    print("[ButtonController] TweenElement called for:", element.Name, "targetScale:", targetScale)
     duration = duration or hoverTweenTime
     easingStyle = easingStyle or Enum.EasingStyle.Quad
     easingDirection = easingDirection or Enum.EasingDirection.Out
@@ -218,9 +215,7 @@ function ButtonController.onFrameVisible(SelectedFrame : Frame)
 end
 
 function ButtonController:ClickedButtonTween(button : GuiButton)
-    print("[ButtonController] ClickedButtonTween for button:", button.Name)
     if buttonClickDebounce[button] then
-        print("[ButtonController] Click debounced for:", button.Name)
         return
     end
     
@@ -337,10 +332,8 @@ end
 function ButtonController:KnitStart()
     local setupButtons = {}
     
-    print("[ButtonController] Setting up buttons from descendants with 'Tween' tag")
     for _, descendant in ipairs(playerGUI:GetDescendants()) do
         if CollectionService:HasTag(descendant, "Tween") then
-            print("[ButtonController] Found tagged button:", descendant.Name)
             if descendant:IsA("GuiButton") or descendant:IsA("ImageButton") then
                 if setupButtons[descendant] then
                     continue
@@ -387,9 +380,7 @@ function ButtonController:KnitStart()
         end
     end
     
-    print("[ButtonController] Setting up direct buttons from LeftContainer")
-    for _, button in leftContainer:GetChildren() do
-        print("[ButtonController] Checking child:", button.Name, "IsGuiButton:", button:IsA("GuiButton"), "IsImageButton:", button:IsA("ImageButton"))
+    for _, button in ipairs(leftContainer:GetChildren()) do
         if button:IsA("GuiButton") or button:IsA("ImageButton") then
             if setupButtons[button] then
                 continue
@@ -434,12 +425,10 @@ function ButtonController:KnitStart()
 end
 
 function ButtonController:KnitInit()
-    print("[ButtonController] KnitInit called")
     self:CleanupFrameTweens()
     self:CleanupButtonConnections()
     isTransitioning = false
     currentFrame = nil
-    print("[ButtonController] KnitInit complete")
 end
 
 return ButtonController

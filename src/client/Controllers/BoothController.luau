@@ -227,7 +227,6 @@ function BoothController:UpdatePreviewColors(preview, currentTyping)
     end
     
     preview.Text = newText
-    print("Updated preview, currentIndex:", self.currentIndex, "Text length:", #newText)
 end
 
 function BoothController:ShakeTextBox(textBox)
@@ -251,9 +250,16 @@ function BoothController:SetupTypingInput(typingGui, preview)
     end
     
     local lastTextLength = 0
+    local lastValidationTime = 0
+    local VALIDATION_COOLDOWN = 0.05
     
     self.typingConnection = textBox:GetPropertyChangedSignal("Text"):Connect(function()
         if not self.gameActive then
+            return
+        end
+        
+        local currentTime = tick()
+        if currentTime - lastValidationTime < VALIDATION_COOLDOWN then
             return
         end
         
@@ -273,6 +279,7 @@ function BoothController:SetupTypingInput(typingGui, preview)
             
             if text == expectedWord then
                 if self.currentIndex == #self.currentWords then
+                    lastValidationTime = currentTime
                     self.BoothService.ValidateWordCompletion:Fire(self.currentIndex, expectedWord)
                     
                     self.currentIndex = self.currentIndex + 1
@@ -306,6 +313,7 @@ function BoothController:SetupTypingInput(typingGui, preview)
                 local expectedWord = self.currentWords[self.currentIndex]
                 
                 if typedWord == expectedWord then
+                    lastValidationTime = currentTime
                     self.BoothService.ValidateWordCompletion:Fire(self.currentIndex, expectedWord)
                     
                     self.currentIndex = self.currentIndex + 1
@@ -316,11 +324,7 @@ function BoothController:SetupTypingInput(typingGui, preview)
                     self:UpdateProgressBar(typingGui)
                     self:ShowFeedback(true)
                     
-                    print("Word completed! Index:", self.currentIndex, "Total words:", #self.currentWords)
-                    
                     if self.currentIndex > #self.currentWords then
-                        print("YOU WON! Firing PlayerWon signal")
-                        
                         self.gameActive = false
                         local screenGui = self:GetScreenGui()
                         if screenGui then
@@ -341,7 +345,6 @@ function BoothController:SetupTypingInput(typingGui, preview)
                     textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
                     lastTextLength = 0
                     
-                    print("Error count:", self.errorCount)
                     self.BoothService.PlayerLost:Fire()
                 end
             end
@@ -367,7 +370,6 @@ function BoothController:CreateTypingGame(words)
     self.gameActive = true
     
     preview.RichText = true
-    print("Preview RichText enabled:", preview.RichText)
     self:UpdatePreviewColors(preview, "")
     self:UpdateProgressBar(typingGui)
     

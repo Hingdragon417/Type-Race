@@ -95,14 +95,9 @@ do
                     playerData = DataController.getData()
                 end
                 
-                print("[Knit.client] Setting up Coins listener, initial coins:", playerData.Coins)
-                
                 DataController.onReplicated("Coins"):Connect(function()
-                    print("[Knit.client] Coins replicated!")
                     local data = DataController.getData()
-                    print("[Knit.client] Current data:", data)
                     if data and data.Coins then
-                        print("[Knit.client] Updating coins display to:", data.Coins)
                         updateCoinsDisplay(data.Coins)
                     end
                 end)

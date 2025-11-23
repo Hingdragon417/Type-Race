@@ -6,6 +6,6 @@ return {
 	HighestWinstreak = 0,
 	WPM = 0,
 	WinRate = 100,
-	KeyboardInventory = {"Default", "Banana", "Blue","Yellow","Broken","TypeWriter","Mini","Ghostly","XL"},
+	KeyboardInventory = {"Default"},
 	EquippedKeyboard = "Default",
 }

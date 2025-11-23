@@ -1,11 +1,11 @@
 local ShopConfig = {
 	Keyboards = {
 		Banana = {
-			Price = 100,
+			Price = 250,
 			DisplayName = "Banana",
 		},
 		Blue = {
-			Price = 150,
+			Price = 50,
 			DisplayName = "Blue",
 		},
 		Broken = {
@@ -13,19 +13,19 @@ local ShopConfig = {
 			DisplayName = "Broken",
 		},
 		Ghostly = {
-			Price = 500,
+			Price = 250,
 			DisplayName = "Ghostly",
 		},
 		Mini = {
-			Price = 300,
+			Price = 60,
 			DisplayName = "Mini",
 		},
 		XL = {
-			Price = 400,
+			Price = 90,
 			DisplayName = "XL",
 		},
 		Yellow = {
-			Price = 125,
+			Price = 50,
 			DisplayName = "Yellow",
 		},
 	},

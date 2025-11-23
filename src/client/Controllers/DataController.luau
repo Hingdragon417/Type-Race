@@ -78,15 +78,11 @@ function DataController.onReplicate(data: { [string]: any }, index: string?)
 			DataController.reconcileTables(DataController._cache, data)
 		end
 
-		print("Data reconciled", DataController._cache, index, data)
-
 		if index then
 			DataController._onReplicate:Fire(index)
 		end
 	else
 		DataController._cache = data
-
-		print("Initial data received", data)
 	end
 end
 

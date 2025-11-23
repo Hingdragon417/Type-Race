@@ -35,6 +35,7 @@ local spawnedKeyboards = {}
 local playerWPM = {}
 local playerTypingStats = {}
 local wpmUpdateLoops = {}
+local _hasPlayerWon = {}
 local DataService
 
 local function isPlayerInBooth(player: Player): boolean
@@ -127,6 +128,7 @@ local function endGame(boothModel: Model)
         playerWordsCompleted[player] = nil
         playerWPM[player] = nil
         playerTypingStats[player] = nil
+        _hasPlayerWon[player] = nil
     end
 end
 
@@ -144,6 +146,7 @@ local function startGame(boothModel: Model, words: {string})
     for _, player in ipairs(playersInBooth) do
         playerErrors[player] = 0
         playerWordsCompleted[player] = 0
+        _hasPlayerWon[player] = nil
         playerTypingStats[player] = {
             startTime = tick(),
             lastTypeTime = tick(),
@@ -177,19 +180,15 @@ end
 
 local function updatePlayerStats(player: Player, won: boolean, averageWPM: number)
     if not DataService then
-        print("[BoothService] DataService is nil")
         return
     end
     
     local session = DataService:getSession(player)
     if not session or not session.Data then
-        print("[BoothService] No session or data for player:", player.Name)
         return
     end
     
     local data = session.Data
-    
-    print("[BoothService] Before update - Player:", player.Name, "Won:", won, "Coins:", data.Coins, "Wins:", data.Wins, "Winstreak:", data.Winstreak)
     
     if won then
         data.Coins = (data.Coins or 0) + 25
@@ -214,8 +213,6 @@ local function updatePlayerStats(player: Player, won: boolean, averageWPM: numbe
         data.WinRate = 0
     end
     
-    print("[BoothService] After update - Coins:", data.Coins, "Wins:", data.Wins, "Winstreak:", data.Winstreak, "WPM:", data.WPM)
-    
     DataService:updateLeaderstats(player, "Winstreak", data.Winstreak)
     DataService:updateLeaderstats(player, "Wins", data.Wins)
     
@@ -226,8 +223,6 @@ local function updatePlayerStats(player: Player, won: boolean, averageWPM: numbe
     DataService:Replicate(player, "HighestWinstreak")
     DataService:Replicate(player, "WPM")
     DataService:Replicate(player, "WinRate")
-    
-    print("[BoothService] Replicated stats for player:", player.Name)
 end
 
 local function endGameWithWinner(boothModel: Model, winner: Player)
@@ -470,6 +465,14 @@ function BoothService:RemovePlayerFromBooth(player: Player)
     
     removeSpawnedKeyboard(player, boothModel)
     
+    if player.Character then
+        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.JumpPower = 50
+            humanoid.JumpHeight = 7.2
+        end
+    end
+    
     activeBooths[player] = nil
     playerErrors[player] = nil
     playerWordsCompleted[player] = nil
@@ -547,7 +550,12 @@ function BoothService:KnitStart()
             return
         end
         
-        print(player.Name .. " won the game!")
+        if _hasPlayerWon[player] then
+            return
+        end
+        
+        _hasPlayerWon[player] = true
+        
         endGameWithWinner(boothModel, player)
     end)
     
@@ -568,14 +576,20 @@ function BoothService:KnitStart()
         playerErrors[player] = playerErrors[player] + 1
         
         if playerErrors[player] >= MAX_ERRORS then
-            print(player.Name .. " lost the game (3 errors)!")
+            if _hasPlayerWon[player] ~= nil then
+                return
+            end
+            
+            _hasPlayerWon[player] = false
             
             local playersInBooth = getPlayersInBooth(boothModel)
             local winner
             for _, otherPlayer in ipairs(playersInBooth) do
                 if otherPlayer ~= player then
                     winner = otherPlayer
-                    print(otherPlayer.Name .. " won the game!")
+                    if not _hasPlayerWon[winner] then
+                        _hasPlayerWon[winner] = true
+                    end
                     break
                 end
             end
@@ -630,23 +644,6 @@ function BoothService:KnitStart()
                 BoothService.Client.UpdateOpponentProgress:Fire(otherPlayer, player.UserId, progress)
             end
         end
-    end)
-    
-    self.Client.PlayerWon:Connect(function(player)
-        if not player or not player.Parent then
-            return
-        end
-        
-        local boothModel = activeBooths[player]
-        if not boothModel or not isGameActive(boothModel) then
-            return
-        end
-        
-        local finalWPM = calculateWPM(player, boothModel)
-        playerWPM[player] = finalWPM
-        
-        print(player.Name .. " won the game!")
-        endGameWithWinner(boothModel, player)
     end)
     
     Players.PlayerRemoving:Connect(function(player)

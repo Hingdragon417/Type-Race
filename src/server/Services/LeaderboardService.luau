@@ -47,7 +47,7 @@ local Leaderboards = {
 
 local DataModule = {}
 
-local LeaderboardData: DataStore = DataStoreService:GetDataStore("LeaderboardData_TEST3")
+local LeaderboardData: DataStore = DataStoreService:GetDataStore("LeaderboardData_TEST6")
 
 function DataModule:GetLeaderboardData(): any
 	local success, data = pcall(function()

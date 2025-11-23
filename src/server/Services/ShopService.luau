@@ -183,8 +183,6 @@ local function spawnKeyboardsInShop()
             end
         end
     end
-    
-    print("[ShopService] Spawned", #currentStock, "keyboards in shop")
 end
 
 local function updateShopTimer()
