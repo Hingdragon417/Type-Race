@@ -497,6 +497,29 @@ function BoothService:RemovePlayerFromBooth(player: Player)
         return
     end
     
+    -- Check if game is active and player hasn't been processed yet
+    -- Only update stats if player is leaving mid-game (not from endGameWithWinner cleanup)
+    if isGameActive(boothModel) and _hasPlayerWon[player] == nil then
+        local wpm = playerWPM[player] or 0
+        updatePlayerStats(player, false, wpm)
+        
+        -- Check if there's another player who should win
+        local playersInBooth = getPlayersInBooth(boothModel)
+        for _, otherPlayer in ipairs(playersInBooth) do
+            if otherPlayer ~= player and otherPlayer.Parent then
+                -- The other player wins by default
+                if not _hasPlayerWon[otherPlayer] then
+                    _hasPlayerWon[otherPlayer] = true
+                    task.spawn(function()
+                        task.wait(0.1)
+                        endGameWithWinner(boothModel, otherPlayer)
+                    end)
+                end
+                break
+            end
+        end
+    end
+    
     removeSpawnedKeyboard(player, boothModel)
     
     if player.Character then
@@ -510,6 +533,9 @@ function BoothService:RemovePlayerFromBooth(player: Player)
     activeBooths[player] = nil
     playerErrors[player] = nil
     playerWordsCompleted[player] = nil
+    playerWPM[player] = nil
+    playerTypingStats[player] = nil
+    _hasPlayerWon[player] = nil
     
     local playerCount = countPlayersInBooth(boothModel)
     updateBoothStatus(boothModel, playerCount)
