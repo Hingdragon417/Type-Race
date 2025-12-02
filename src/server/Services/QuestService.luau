@@ -272,8 +272,10 @@ function QuestService:CompleteQuest(player: Player, questName: string)
         if not session.Data.Coins then
             session.Data.Coins = 0
         end
-        print("[QuestService] Completing quest for", player.Name, questName, "Reward:", questData.Reward)
-        session.Data.Coins = session.Data.Coins + questData.Reward
+        local coinMultiplier = session.Data.DoubleCoins and 2 or 1
+        local reward = questData.Reward * coinMultiplier
+        print("[QuestService] Completing quest for", player.Name, questName, "Reward:", reward, "(multiplier:", coinMultiplier .. ")")
+        session.Data.Coins = session.Data.Coins + reward
         print("[QuestService] New coin amount:", session.Data.Coins)
         DataService:Replicate(player, "Coins")
     end

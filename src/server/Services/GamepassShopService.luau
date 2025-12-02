@@ -7,6 +7,7 @@ local Knit = require(ReplicatedStorage.Packages.Knit)
 
 local TypewriterStockStore = DataStoreService:GetDataStore("TypewriterStock_V1")
 local GAMEPASS_ID = 1596090373
+local DOUBLE_COINS_GAMEPASS_ID = 1615560467
 local INITIAL_STOCK = 100
 
 local COIN_PRODUCTS = {
@@ -101,7 +102,7 @@ function TypewriterShopService:addTypewriterToInventory(player)
 end
 
 function TypewriterShopService:checkAndGrantGamepass(player)
-    -- Check if player owns the gamepass
+    -- Check if player owns the typewriter gamepass
     local ownsGamepass = false
     local success, result = pcall(function()
         return MarketplaceService:UserOwnsGamePassAsync(player.UserId, GAMEPASS_ID)
@@ -130,6 +131,26 @@ function TypewriterShopService:checkAndGrantGamepass(player)
     if wasAdded then
         -- Decrease stock
         self:setStock(currentStock - 1)
+    end
+end
+
+function TypewriterShopService:checkDoubleCoinsGamepass(player)
+    local ownsGamepass = false
+    local success, result = pcall(function()
+        return MarketplaceService:UserOwnsGamePassAsync(player.UserId, DOUBLE_COINS_GAMEPASS_ID)
+    end)
+    
+    if success then
+        ownsGamepass = result
+    else
+        warn("[TypewriterShopService] Error checking double coins gamepass:", result)
+        return
+    end
+    
+    local session = DataService:getSession(player)
+    if session and session.Data then
+        session.Data.DoubleCoins = ownsGamepass
+        DataService:Replicate(player, "DoubleCoins")
     end
 end
 
@@ -206,6 +227,7 @@ function TypewriterShopService:KnitInit()
     Players.PlayerAdded:Connect(function(player)
         task.wait(2) -- Wait for data to load
         self:checkAndGrantGamepass(player)
+        self:checkDoubleCoinsGamepass(player)
     end)
     
     -- Check existing players
@@ -213,6 +235,7 @@ function TypewriterShopService:KnitInit()
         task.spawn(function()
             task.wait(2)
             self:checkAndGrantGamepass(player)
+            self:checkDoubleCoinsGamepass(player)
         end)
     end
     
@@ -220,6 +243,8 @@ function TypewriterShopService:KnitInit()
     MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamepassId, wasPurchased)
         if gamepassId == GAMEPASS_ID and wasPurchased then
             self:checkAndGrantGamepass(player)
+        elseif gamepassId == DOUBLE_COINS_GAMEPASS_ID and wasPurchased then
+            self:checkDoubleCoinsGamepass(player)
         end
     end)
 end

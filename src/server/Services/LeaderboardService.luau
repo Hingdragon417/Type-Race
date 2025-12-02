@@ -365,17 +365,13 @@ function LeaderboardService.onServerStart()
 	end
 
 	Players.PlayerAdded:Connect(function(player: Player)
-		print("[LeaderboardService] Player joined:", player.Name)
 		local session = DataService.waitForSession(player)
 		if not session or not session.Data then
-			print("[LeaderboardService] No session data for player:", player.Name)
 			return
 		end
-		print("[LeaderboardService] Session data found for:", player.Name)
 
 		for _, statName in ipairs(Leaderboards.SavedStats) do
 			local playerStatValue = session.Data[statName]
-			print("[LeaderboardService] Player", player.Name, "stat", statName, "=", playerStatValue)
 			if playerStatValue and type(playerStatValue) == "number" and playerStatValue > 0 then
 				Leaderboards:ValidatePlayerStatPeak(player, statName, playerStatValue)
 				LeaderboardService.onPlayerDataChange(player, statName, playerStatValue)
@@ -458,25 +454,19 @@ function LeaderboardService.onServerStart()
 end
 
 function LeaderboardService.onPlayerDataChange(player: Player, statName: string, newValue: number)
-	print("[LeaderboardService] onPlayerDataChange:", player.Name, statName, newValue)
 	if not table.find(Leaderboards.SavedStats, statName) then
-		print("[LeaderboardService] Stat not tracked:", statName)
 		return
 	end
 
 	local s: boolean = Leaderboards:ValidatePlayerStatPeak(player, statName, newValue)
 	if not s then
-		print("[LeaderboardService] Not a new peak for:", player.Name, statName)
 		return
 	end
-	print("[LeaderboardService] New peak validated for:", player.Name, statName, newValue)
 
 	local worthy: boolean = CacheUtil:isValueWorthy(player, statName, newValue)
 	if not worthy then
-		print("[LeaderboardService] Value not worthy:", player.Name, statName, newValue)
 		return
 	end
-	print("[LeaderboardService] Value is worthy:", player.Name, statName, newValue)
 
 	local activePlayerCooldown = Leaderboards.updateCooldowns[player.UserId] and Leaderboards.updateCooldowns[player.UserId][statName]
 	if activePlayerCooldown then

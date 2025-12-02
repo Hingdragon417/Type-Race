@@ -19,11 +19,16 @@ local BoothService = Knit.CreateService({
 		UpdateOpponentProgress = Knit.CreateSignal(),
 		UpdateBoothPlayerCount = Knit.CreateSignal(),
 		PlaySolo = Knit.CreateSignal(),
+		StartVoting = Knit.CreateSignal(),
+		CastVote = Knit.CreateSignal(),
+		UpdateVotes = Knit.CreateSignal(),
+		VotingComplete = Knit.CreateSignal(),
 	}
 })
 
 local REQUIRED_PLAYERS = 2
 local COUNTDOWN_SECONDS = 5
+local VOTING_SECONDS = 10
 local WORD_COUNT = 35
 local MAX_ERRORS = 5
 local BOT_AVATAR_ID = 9741864268
@@ -46,7 +51,10 @@ local wpmUpdateLoops = {}
 local hasPlayerWon = {}
 local soloGameBots = {}
 local botUpdateLoops = {}
+local boothVotes = {}
+local playerVoted = {}
 local DataService, TypewriterShopService, QuestService
+local WordModule
 
 local function getPlayersInBooth(boothModel: Model): {Player}
 	local players = {}
@@ -102,6 +110,7 @@ local function clearPlayerData(player: Player)
 end
 
 local function endGame(boothModel: Model)
+	print("[Server] Ending game for booth:", boothModel.Name)
 	stopLoop(wpmUpdateLoops, boothModel)
 	stopLoop(botUpdateLoops, boothModel)
 	soloGameBots[boothModel] = nil
@@ -109,6 +118,7 @@ local function endGame(boothModel: Model)
 	setBoothHitboxCanCollide(boothModel, false)
 
 	for _, player in ipairs(getPlayersInBooth(boothModel)) do
+		print("[Server] Clearing player data for:", player.Name)
 		clearPlayerData(player)
 	end
 end
@@ -124,15 +134,19 @@ local function kickPlayerFromSeat(player: Player)
 end
 
 local function updatePlayerStats(player: Player, won: boolean, averageWPM: number, isSolo: boolean)
+	print("[Server] Updating stats for:", player.Name, "| Won:", won, "| WPM:", averageWPM, "| Solo:", isSolo)
 	if not DataService then return end
 
 	local session = DataService:getSession(player)
 	if not session or not session.Data then return end
 
 	local data = session.Data
+	local coinMultiplier = data.DoubleCoins and 2 or 1
+	print("[Server] Coin multiplier for", player.Name, ":", coinMultiplier)
 
 	if isSolo then
-		data.Coins = (data.Coins or 0) + (won and 12 or 5)
+		local coins = won and 12 or 5
+		data.Coins = (data.Coins or 0) + (coins * coinMultiplier)
 		data.WPM = math.floor(averageWPM)
 		DataService:Replicate(player, "Coins")
 		DataService:Replicate(player, "WPM")
@@ -140,7 +154,7 @@ local function updatePlayerStats(player: Player, won: boolean, averageWPM: numbe
 	end
 
 	if won then
-		data.Coins = (data.Coins or 0) + 25
+		data.Coins = (data.Coins or 0) + (25 * coinMultiplier)
 		data.Wins = (data.Wins or 0) + 1
 		data.Winstreak = (data.Winstreak or 0) + 1
 
@@ -153,7 +167,7 @@ local function updatePlayerStats(player: Player, won: boolean, averageWPM: numbe
 			QuestService:TrackWinStreak(player, data.Winstreak)
 		end
 	else
-		data.Coins = (data.Coins or 0) + 10
+		data.Coins = (data.Coins or 0) + (10 * coinMultiplier)
 		data.Losses = (data.Losses or 0) + 1
 
 		local previousWinstreak = data.Winstreak or 0
@@ -181,15 +195,18 @@ local function updatePlayerStats(player: Player, won: boolean, averageWPM: numbe
 end
 
 local function endSoloGame(boothModel: Model, player: Player, playerWon: boolean)
+	print("[Server] Ending solo game | Player:", player and player.Name or "nil", "| Won:", playerWon)
 	stopLoop(botUpdateLoops, boothModel)
 	soloGameBots[boothModel] = nil
 
 	if not player or not player.Parent then
+		print("[Server] Player left during solo game, ending")
 		endGame(boothModel)
 		return
 	end
 
 	local wpm = playerWPM[player] or 0
+	print("[Server] Solo game final WPM:", wpm)
 	updatePlayerStats(player, playerWon, wpm, true)
 
 	if playerWon and QuestService then
@@ -209,11 +226,13 @@ local function endSoloGame(boothModel: Model, player: Player, playerWon: boolean
 end
 
 local function endGameWithWinner(boothModel: Model, winner: Player)
+	print("[Server] Game ended with winner:", winner.Name)
 	local playersInBooth = getPlayersInBooth(boothModel)
 
 	for _, player in ipairs(playersInBooth) do
 		local wpm = playerWPM[player] or 0
 		local won = player == winner
+		print("[Server] Processing player:", player.Name, "| Won:", won, "| WPM:", wpm)
 		updatePlayerStats(player, won, wpm, false)
 
 		if won and QuestService then
@@ -237,6 +256,7 @@ local function endGameWithWinner(boothModel: Model, winner: Player)
 end
 
 local function startBotProgress(boothModel: Model, player: Player, totalWords: number)
+	print("[Server] Starting bot progress for player:", player.Name, "| Words:", totalWords)
 	soloGameBots[boothModel] = {
 		progress = 0,
 		isStuttering = false,
@@ -337,9 +357,17 @@ local function startGame(boothModel: Model, words: {string})
 	activeGames[boothModel] = { words = words, startTime = tick() }
 	setBoothHitboxCanCollide(boothModel, true)
 
-	for _, player in ipairs(getPlayersInBooth(boothModel)) do
+	local playersInBooth = getPlayersInBooth(boothModel)
+	for _, player in ipairs(playersInBooth) do
 		initializePlayerStats(player)
-		BoothService.Client.StartGame:Fire(player, boothModel, words)
+		local opponentUserId = nil
+		for _, otherPlayer in ipairs(playersInBooth) do
+			if otherPlayer ~= player then
+				opponentUserId = otherPlayer.UserId
+				break
+			end
+		end
+		BoothService.Client.StartGame:Fire(player, boothModel, words, opponentUserId)
 	end
 
 	startWPMUpdates(boothModel)
@@ -368,23 +396,39 @@ local function hideBoothStatus(boothModel: Model)
 end
 
 local function loadWordModule()
-	local shared = ReplicatedStorage:FindFirstChild("Shared")
-	local wordModule = shared and (shared:FindFirstChild("WordModule") or shared:FindFirstChild("WordModula"))
-	wordModule = wordModule or ReplicatedStorage:FindFirstChild("WordModule") or ReplicatedStorage:FindFirstChild("WordModula")
+	if WordModule then return WordModule end
 
-	if wordModule then
-		local success, module = pcall(require, wordModule)
-		if success then return module end
+	local shared = ReplicatedStorage:FindFirstChild("Shared")
+	local wordModuleScript = shared and (shared:FindFirstChild("WordModule") or shared:FindFirstChild("WordModula"))
+	wordModuleScript = wordModuleScript or ReplicatedStorage:FindFirstChild("WordModule") or ReplicatedStorage:FindFirstChild("WordModula")
+
+	if wordModuleScript then
+		local success, module = pcall(require, wordModuleScript)
+		if success then
+			WordModule = module
+			return module
+		end
 	end
 	return nil
 end
 
-local function generateWords(count: number): {string}
+local function generateWords(count: number, difficulty: string?): {string}
 	local wordModule = loadWordModule()
-	local words = {}
+	if not wordModule then
+		local words = {}
+		for i = 1, count do
+			table.insert(words, "word" .. i)
+		end
+		return words
+	end
 
+	if difficulty and wordModule.GenerateWordsFromDifficulty then
+		return wordModule.GenerateWordsFromDifficulty(difficulty, count)
+	end
+
+	local words = {}
 	for i = 1, count do
-		local word = wordModule and wordModule.GetRandomWord and wordModule.GetRandomWord()
+		local word = wordModule.GetRandomWord and wordModule.GetRandomWord()
 		if type(word) ~= "string" or #word == 0 then
 			word = "word" .. i
 		end
@@ -392,6 +436,22 @@ local function generateWords(count: number): {string}
 	end
 
 	return words
+end
+
+local function getRandomDifficulties(): {string}
+	local wordModule = loadWordModule()
+	if wordModule and wordModule.GetRandomDifficulties then
+		return wordModule.GetRandomDifficulties(3)
+	end
+	return {"Easy", "Medium", "Hard"}
+end
+
+local function getDifficultyInfo(difficulty: string): {name: string, description: string}?
+	local wordModule = loadWordModule()
+	if wordModule and wordModule.GetDifficultyInfo then
+		return wordModule.GetDifficultyInfo(difficulty)
+	end
+	return {name = difficulty, description = ""}
 end
 
 local function disablePlayerJump(player: Player)
@@ -408,6 +468,130 @@ local function enablePlayerJump(player: Player)
 		humanoid.JumpPower = 50
 		humanoid.JumpHeight = 7.2
 	end
+end
+
+local function startVotingPhase(boothModel: Model, isSolo: boolean)
+	print("[Server] Starting voting phase | Solo:", isSolo)
+	local playersInBooth = getPlayersInBooth(boothModel)
+	local difficulties = getRandomDifficulties()
+	print("[Server] Voting difficulties:", table.concat(difficulties, ", "))
+
+	boothVotes[boothModel] = {
+		difficulties = difficulties,
+		votes = {},
+		isSolo = isSolo,
+	}
+
+	for _, difficulty in ipairs(difficulties) do
+		boothVotes[boothModel].votes[difficulty] = 0
+	end
+
+	for _, player in ipairs(playersInBooth) do
+		playerVoted[player] = false
+		disablePlayerJump(player)
+		BoothService.Client.StartVoting:Fire(player, difficulties, VOTING_SECONDS)
+	end
+
+	task.spawn(function()
+		local startTime = tick()
+		local votingData = boothVotes[boothModel]
+
+		while tick() - startTime < VOTING_SECONDS do
+			if not votingData or not boothVotes[boothModel] then return end
+
+			local allVoted = true
+			for _, player in ipairs(getPlayersInBooth(boothModel)) do
+				if not playerVoted[player] then
+					allVoted = false
+					break
+				end
+			end
+
+			if allVoted and not isSolo then
+				break
+			end
+
+			task.wait(0.25)
+		end
+
+		if not boothVotes[boothModel] then return end
+
+		local votes = boothVotes[boothModel].votes
+		local chosenDifficulty = nil
+		local highestVotes = 0
+
+		for difficulty, voteCount in pairs(votes) do
+			if voteCount > highestVotes then
+				highestVotes = voteCount
+				chosenDifficulty = difficulty
+			end
+		end
+
+		if highestVotes == 0 then
+			chosenDifficulty = difficulties[math.random(1, #difficulties)]
+			print("[Server] No votes cast, randomly selected:", chosenDifficulty)
+		end
+
+		print("[Server] Voting complete! Chosen difficulty:", chosenDifficulty, "| Votes:", highestVotes)
+		for _, player in ipairs(getPlayersInBooth(boothModel)) do
+			BoothService.Client.VotingComplete:Fire(player, chosenDifficulty)
+		end
+
+		task.wait(1.5)
+
+		local words = generateWords(WORD_COUNT, chosenDifficulty)
+
+		if isSolo then
+			local player = playersInBooth[1]
+			if player and player.Parent then
+				activeGames[boothModel] = {
+					words = words,
+					startTime = tick(),
+					isSoloGame = true,
+					difficulty = chosenDifficulty,
+				}
+
+				setBoothHitboxCanCollide(boothModel, true)
+				initializePlayerStats(player)
+				BoothService.Client.StartGame:Fire(player, boothModel, words, BOT_AVATAR_ID)
+				startWPMUpdates(boothModel)
+
+				task.delay(0.1, function()
+					local game = activeGames[boothModel]
+					if game and game.isSoloGame then
+						startBotProgress(boothModel, player, WORD_COUNT)
+					end
+				end)
+			end
+		else
+			activeGames[boothModel] = {
+				words = words,
+				startTime = tick(),
+				difficulty = chosenDifficulty,
+			}
+			setBoothHitboxCanCollide(boothModel, true)
+
+			local allPlayers = getPlayersInBooth(boothModel)
+			for _, player in ipairs(allPlayers) do
+				initializePlayerStats(player)
+				local opponentUserId = nil
+				for _, otherPlayer in ipairs(allPlayers) do
+					if otherPlayer ~= player then
+						opponentUserId = otherPlayer.UserId
+						break
+					end
+				end
+				BoothService.Client.StartGame:Fire(player, boothModel, words, opponentUserId)
+			end
+
+			startWPMUpdates(boothModel)
+		end
+
+		for _, player in ipairs(getPlayersInBooth(boothModel)) do
+			playerVoted[player] = nil
+		end
+		boothVotes[boothModel] = nil
+	end)
 end
 
 local function startBoothCountdown(boothModel: Model)
@@ -431,15 +615,7 @@ local function startBoothCountdown(boothModel: Model)
 
 		if countPlayersInBooth(boothModel) >= REQUIRED_PLAYERS then
 			hideBoothStatus(boothModel)
-
-			local playersInBooth = getPlayersInBooth(boothModel)
-			for _, player in ipairs(playersInBooth) do
-				disablePlayerJump(player)
-				BoothService.Client.BeginCountdown:Fire(player, COUNTDOWN_SECONDS)
-			end
-
-			task.wait(0.1)
-			startGame(boothModel, generateWords(WORD_COUNT))
+			startVotingPhase(boothModel, false)
 		end
 
 		boothCountdowns[boothModel] = nil
@@ -486,8 +662,10 @@ end
 function BoothService:AddPlayerToBooth(player: Player, boothModel: Model)
 	if not player or not player.Parent or activeBooths[player] then return end
 
+	print("[Server] Adding player to booth:", player.Name, "| Booth:", boothModel.Name)
 	activeBooths[player] = boothModel
 	local playerCount = countPlayersInBooth(boothModel)
+	print("[Server] Booth player count:", playerCount)
 
 	self.Client.UpdateCamera:Fire(player, boothModel)
 	updateBoothStatus(boothModel, playerCount)
@@ -507,7 +685,9 @@ function BoothService:RemovePlayerFromBooth(player: Player)
 	local boothModel = activeBooths[player]
 	if not boothModel then return end
 
+	print("[Server] Removing player from booth:", player.Name)
 	if isGameActive(boothModel) and hasPlayerWon[player] == nil then
+		print("[Server] Player left during active game, marking as loss")
 		updatePlayerStats(player, false, playerWPM[player] or 0, false)
 
 		for _, otherPlayer in ipairs(getPlayersInBooth(boothModel)) do
@@ -581,13 +761,18 @@ function BoothService:KnitStart()
 	end
 
 	self.Client.PlayerWon:Connect(function(player)
+		print("[Server] PlayerWon signal received from:", player and player.Name or "nil")
 		if not player or not player.Parent then return end
 
 		local boothModel = activeBooths[player]
 		local gameData = boothModel and activeGames[boothModel]
-		if not gameData or hasPlayerWon[player] then return end
+		if not gameData or hasPlayerWon[player] then 
+			print("[Server] PlayerWon ignored - no game data or already won")
+			return 
+		end
 
 		hasPlayerWon[player] = true
+		print("[Server] Player won the game:", player.Name, "| Solo:", gameData.isSoloGame)
 
 		if gameData.isSoloGame then
 			endSoloGame(boothModel, player, true)
@@ -597,14 +782,17 @@ function BoothService:KnitStart()
 	end)
 
 	self.Client.PlayerLost:Connect(function(player)
+		print("[Server] PlayerLost signal received from:", player and player.Name or "nil")
 		if not player or not player.Parent then return end
 
 		local boothModel = activeBooths[player]
 		if not boothModel or not isGameActive(boothModel) or not playerErrors[player] then return end
 
 		playerErrors[player] = playerErrors[player] + 1
+		print("[Server] Player error count:", player.Name, "|", playerErrors[player], "/", MAX_ERRORS)
 
 		if playerErrors[player] >= MAX_ERRORS and hasPlayerWon[player] == nil then
+			print("[Server] Player reached max errors, triggering loss:", player.Name)
 			hasPlayerWon[player] = false
 
 			for _, otherPlayer in ipairs(getPlayersInBooth(boothModel)) do
@@ -625,6 +813,7 @@ function BoothService:KnitStart()
 		if not gameData or not gameData.words then return end
 		if wordIndex < 1 or wordIndex > #gameData.words or gameData.words[wordIndex] ~= word then return end
 
+		print("[Server] Word completed:", player.Name, "| Word:", wordIndex, "/", #gameData.words)
 		local stats = playerTypingStats[player]
 		if stats then
 			stats.correctWordCount = stats.correctWordCount + 1
@@ -653,36 +842,48 @@ function BoothService:KnitStart()
 	end)
 
 	self.Client.PlaySolo:Connect(function(player)
+		print("[Server] PlaySolo signal received from:", player and player.Name or "nil")
 		if not player or not player.Parent then return end
 
 		local boothModel = activeBooths[player]
-		if not boothModel or countPlayersInBooth(boothModel) ~= 1 or isGameActive(boothModel) then return end
+		if not boothModel or countPlayersInBooth(boothModel) ~= 1 or isGameActive(boothModel) then 
+			print("[Server] PlaySolo rejected - invalid state")
+			return 
+		end
+		if boothVotes[boothModel] then return end
 
-		local words = generateWords(WORD_COUNT)
-
-		activeGames[boothModel] = {
-			words = words,
-			startTime = tick(),
-			isSoloGame = true,
-		}
-
-		setBoothHitboxCanCollide(boothModel, true)
+		print("[Server] Starting solo game for:", player.Name)
 		hideBoothStatus(boothModel)
-		disablePlayerJump(player)
+		startVotingPhase(boothModel, true)
+	end)
 
-		self.Client.BeginCountdown:Fire(player, COUNTDOWN_SECONDS)
-		task.wait(0.1)
+	self.Client.CastVote:Connect(function(player, difficulty, previousVote)
+		print("[Server] CastVote received:", player and player.Name or "nil", "| Vote:", difficulty, "| Previous:", previousVote or "none")
+		if not player or not player.Parent then return end
 
-		initializePlayerStats(player)
-		self.Client.StartGame:Fire(player, boothModel, words)
-		startWPMUpdates(boothModel)
+		local boothModel = activeBooths[player]
+		if not boothModel then return end
 
-		task.delay(5.5, function()
-			local game = activeGames[boothModel]
-			if game and game.isSoloGame then
-				startBotProgress(boothModel, player, WORD_COUNT)
+		local votingData = boothVotes[boothModel]
+		if not votingData then return end
+
+		if not votingData.votes[difficulty] then return end
+
+		if previousVote and votingData.votes[previousVote] then
+			votingData.votes[previousVote] = math.max(0, votingData.votes[previousVote] - 1)
+		end
+
+		playerVoted[player] = true
+		votingData.votes[difficulty] = votingData.votes[difficulty] + 1
+		print("[Server] Vote registered for:", difficulty, "| New count:", votingData.votes[difficulty])
+
+		for _, p in ipairs(getPlayersInBooth(boothModel)) do
+			local voteTable = {}
+			for diff, count in pairs(votingData.votes) do
+				voteTable[diff] = count
 			end
-		end)
+			self.Client.UpdateVotes:Fire(p, voteTable)
+		end
 	end)
 end
 

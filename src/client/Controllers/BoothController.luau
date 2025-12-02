@@ -28,13 +28,17 @@ local BoothController = Knit.CreateController({
 	currentWords = {} :: {string},
 	currentIndex = 1 :: number,
 	typingConnection = nil :: RBXScriptConnection?,
+	_focusLostConnection = nil :: RBXScriptConnection?,
 	errorCount = 0 :: number,
 	gameActive = false :: boolean,
 	currentBooth = nil :: Model?,
 	hiddenBillboards = {} :: {BillboardGui},
 	_countdownCancel = false :: boolean,
 	_playSoloButtonConnection = nil :: RBXScriptConnection?,
-	
+	_votingConnections = {} :: {RBXScriptConnection},
+	_votingContainer = nil :: Frame?,
+	_hasVoted = false :: boolean,
+	_currentVote = nil :: string?,
 
 	_player = nil :: Player?,
 	_playerGui = nil :: PlayerGui?,
@@ -146,18 +150,21 @@ function BoothController:ShowAllBillboards()
 end
 
 function BoothController:UpdateCamera(boothModel: Model)
+	print("[Client] UpdateCamera - Setting camera for booth:", boothModel.Name)
 	self.currentBooth = boothModel
 	self:HideOtherBoothBillboards(boothModel)
 	
 	local camera = self:_getCachedCamera()
 	local camPart = boothModel:FindFirstChild("Camera")
 	if camPart then
+		print("[Client] Camera positioned to booth camera part")
 		camera.CameraType = Enum.CameraType.Scriptable
 		camera.CFrame = camPart.CFrame
 	end
 end
 
 function BoothController:RevertCamera()
+	print("[Client] RevertCamera - Restoring default camera")
 	self.currentBooth = nil
 	self:ShowAllBillboards()
 	self:_getCachedCamera().CameraType = Enum.CameraType.Custom
@@ -176,6 +183,7 @@ function BoothController:SetJumpAbility(enabled: boolean)
 end
 
 function BoothController:ShowPlaySoloButton()
+	print("[Client] ShowPlaySoloButton - Displaying solo play button")
 	local screenGui = self:_getCachedScreenGui()
 	if not screenGui then return end
 	
@@ -197,6 +205,7 @@ function BoothController:ShowPlaySoloButton()
 end
 
 function BoothController:HidePlaySoloButton()
+	print("[Client] HidePlaySoloButton - Hiding solo play button")
 	local screenGui = self:_getCachedScreenGui()
 	if not screenGui then return end
 	
@@ -212,6 +221,7 @@ function BoothController:HidePlaySoloButton()
 end
 
 function BoothController:UpdateBoothPlayerCount(playerCount: number)
+	print("[Client] UpdateBoothPlayerCount - Count:", playerCount)
 	if playerCount == 1 then
 		self:ShowPlaySoloButton()
 	else
@@ -235,6 +245,7 @@ function BoothController:HideStatusLabel()
 end
 
 function BoothController:ShowFeedback(isCorrect: boolean)
+	print("[Client] ShowFeedback - Correct:", isCorrect)
 	local statusLabel = self:_findStatusLabel()
 	if not statusLabel then return end
 	
@@ -260,6 +271,7 @@ function BoothController:ShowFeedback(isCorrect: boolean)
 end
 
 function BoothController:ShowStartCountdown(seconds: number?)
+	print("[Client] ShowStartCountdown - Starting countdown")
 	seconds = seconds or 5
 	self._countdownCancel = false
 	
@@ -267,37 +279,178 @@ function BoothController:ShowStartCountdown(seconds: number?)
 	if not statusLabel then return end
 	
 	statusLabel.Visible = true
-	statusLabel.Text = ""
-	
-
-	local initialText = `Get ready to type in {seconds}`
-	for j = 1, #initialText do
-		if self._countdownCancel then
-			statusLabel.Visible = false
-			return
-		end
-		statusLabel.Text = string.sub(initialText, 1, j)
-		task.wait(COUNTDOWN_CHAR_DELAY)
-	end
-	
-
-	for i = seconds - 1, 1, -1 do
-		if self._countdownCancel then
-			statusLabel.Visible = false
-			return
-		end
-		statusLabel.Text = `Get ready to type in {i}`
-		task.wait(1)
-	end
-	
 	statusLabel.Text = "Go!"
 	task.wait(0.6)
 	statusLabel.Visible = false
 	self._countdownCancel = false
 end
 
+function BoothController:CleanupVotingUI()
+	for _, conn in self._votingConnections do
+		conn:Disconnect()
+	end
+	table.clear(self._votingConnections)
+	
+	local screenGui = self:_getCachedScreenGui()
+	if screenGui then
+		local voting = screenGui:FindFirstChild("Voting")
+		if voting then
+			voting.Visible = false
+			local container = voting:FindFirstChild("Container")
+			if container then
+				for _, child in container:GetChildren() do
+					if not child:IsA("UIListLayout") and not child:IsA("UIGridLayout") then
+						child:Destroy()
+					end
+				end
+			end
+		end
+	end
+	
+	self._votingContainer = nil
+	self._hasVoted = false
+	self._currentVote = nil
+end
+
+function BoothController:ShowVotingUI(difficulties: {string}, countdownSeconds: number)
+	print("[Client] ShowVotingUI - Difficulties:", table.concat(difficulties, ", "), "| Countdown:", countdownSeconds)
+	self:CleanupVotingUI()
+	self._hasVoted = false
+	
+	local screenGui = self:_getCachedScreenGui()
+	if not screenGui then return end
+	
+	local voting = screenGui:FindFirstChild("Voting")
+	if not voting then
+		warn("Voting frame not found in ScreenGui")
+		return
+	end
+	
+	voting.Visible = true
+	self._votingContainer = voting
+	
+	local container = voting:FindFirstChild("Container")
+	if not container then
+		warn("Container not found in Voting frame")
+		return
+	end
+	
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local uiAssets = assets and assets:FindFirstChild("UIAssets")
+	local votingTemplate = uiAssets and uiAssets:FindFirstChild("VotingTemplate")
+	
+	if not votingTemplate then
+		warn("VotingTemplate not found in ReplicatedStorage.Assets.UIAssets")
+		return
+	end
+	
+	local countdownLabel = voting:FindFirstChild("Countdown") or voting:FindFirstChild("Timer")
+	if countdownLabel and countdownLabel:IsA("TextLabel") then
+		countdownLabel.Text = tostring(countdownSeconds)
+	end
+	
+	local statusLabel = self:_findStatusLabel()
+	if statusLabel then
+		statusLabel.Visible = true
+		statusLabel.TextColor3 = COLOR_YELLOW
+		statusLabel.Text = `Vote! Time: {countdownSeconds}`
+	end
+	
+	task.spawn(function()
+		for i = countdownSeconds, 1, -1 do
+			if not voting.Visible then break end
+			if countdownLabel and countdownLabel:IsA("TextLabel") then
+				countdownLabel.Text = tostring(i)
+			end
+			if statusLabel and statusLabel.Parent then
+				statusLabel.Text = `Vote! Time: {i}`
+			end
+			task.wait(1)
+		end
+	end)
+	
+	for _, difficulty in ipairs(difficulties) do
+		local option = votingTemplate:Clone()
+		option.Name = difficulty
+		option.Visible = true
+		option.Parent = container
+		
+		local modeLabel = option:FindFirstChild("Mode")
+		if modeLabel and modeLabel:IsA("TextLabel") then
+			modeLabel.Text = difficulty
+		end
+		
+		local votesLabel = option:FindFirstChild("Votes")
+		if votesLabel and votesLabel:IsA("TextLabel") then
+			votesLabel.Text = "0"
+		end
+		
+		local voteButton = option:FindFirstChild("TextButton") or option:FindFirstChildWhichIsA("TextButton")
+		if voteButton then
+			local conn = voteButton.MouseButton1Click:Connect(function()
+				if self._currentVote == difficulty then return end
+				
+				print("[Client] Vote cast for:", difficulty, "| Previous:", self._currentVote or "none")
+				local previousVote = self._currentVote
+				self._currentVote = difficulty
+				self._hasVoted = true
+				self.BoothService.CastVote:Fire(difficulty, previousVote)
+				
+				for _, child in container:GetChildren() do
+					if child:IsA("Frame") or child:IsA("ImageLabel") then
+						if child.Name == difficulty then
+							child.BackgroundColor3 = COLOR_GREEN
+						else
+							child.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+						end
+					end
+				end
+			end)
+			table.insert(self._votingConnections, conn)
+		end
+	end
+end
+
+function BoothController:UpdateVotes(voteTable: {[string]: number})
+	print("[Client] UpdateVotes - Received vote update")
+	if not self._votingContainer then return end
+	
+	local container = self._votingContainer:FindFirstChild("Container")
+	if not container then return end
+	
+	for difficulty, count in pairs(voteTable) do
+		local option = container:FindFirstChild(difficulty)
+		if option then
+			local votesLabel = option:FindFirstChild("Votes")
+			if votesLabel and votesLabel:IsA("TextLabel") then
+				votesLabel.Text = tostring(count)
+			end
+		end
+	end
+end
+
+function BoothController:ShowVotingResult(chosenDifficulty: string)
+	print("[Client] ShowVotingResult - Chosen:", chosenDifficulty)
+	local statusLabel = self:_findStatusLabel()
+	if statusLabel then
+		statusLabel.Visible = true
+		statusLabel.Text = `Playing: {chosenDifficulty}!`
+		statusLabel.TextColor3 = COLOR_GREEN
+	end
+	
+	self:CleanupVotingUI()
+	
+	task.delay(1.5, function()
+		if statusLabel and statusLabel.Parent then
+			statusLabel.Visible = false
+			statusLabel.TextColor3 = COLOR_WHITE
+		end
+	end)
+end
+
 function BoothController:UpdateOpponentProgress(opponentUserId: number, progress: number)
 	if not self.gameActive then return end
+	print("[Client] UpdateOpponentProgress - Opponent:", opponentUserId, "| Progress:", string.format("%.1f%%", progress * 100))
 	
 	local screenGui = self:_getCachedScreenGui()
 	if not screenGui then return end
@@ -414,6 +567,7 @@ function BoothController:_shakeTextBox(textBox: TextBox)
 end
 
 function BoothController:_handleWordCompletion(textBox: TextBox, typingGui: Frame, preview: TextLabel, expectedWord: string, currentTime: number): number
+	print("[Client] Word completed:", self.currentIndex, "/", #self.currentWords, "| Word:", expectedWord)
 	self.BoothService.ValidateWordCompletion:Fire(self.currentIndex, expectedWord)
 	
 	self.currentIndex += 1
@@ -423,6 +577,7 @@ function BoothController:_handleWordCompletion(textBox: TextBox, typingGui: Fram
 	self:UpdateProgressBar(typingGui)
 	
 	if self.currentIndex > #self.currentWords then
+		print("[Client] All words completed - Sending PlayerWon signal")
 		self.gameActive = false
 		typingGui.Visible = false
 		self.BoothService.PlayerWon:Fire()
@@ -441,7 +596,46 @@ function BoothController:SetupTypingInput(typingGui: Frame, preview: TextLabel)
 		self.typingConnection = nil
 	end
 	
+	if self._focusLostConnection then
+		self._focusLostConnection:Disconnect()
+		self._focusLostConnection = nil
+	end
+	
 	local lastValidationTime = 0
+	
+	self._focusLostConnection = textBox.FocusLost:Connect(function(enterPressed)
+		if not self.gameActive then return end
+		
+		if enterPressed then
+			local text = string.gsub(textBox.Text, "%s+", "")
+			local expectedWord = self.currentWords[self.currentIndex]
+			
+			if text == expectedWord then
+				print("[Client] Enter pressed - Word correct:", text)
+				self:_handleWordCompletion(textBox, typingGui, preview, expectedWord, tick())
+				self:ShowFeedback(true)
+			elseif #text > 0 then
+				self.errorCount += 1
+				print("[Client] Enter pressed - Typing error:", self.errorCount, "/5 | Typed:", text, "| Expected:", expectedWord)
+				self:_shakeTextBox(textBox)
+				self:ShowFeedback(false)
+				textBox.Text = ""
+				textBox.TextColor3 = COLOR_WHITE
+				
+				local errorsLabel = typingGui:FindFirstChild("Errors") :: TextLabel?
+				if errorsLabel then
+					errorsLabel.Text = `Errors {self.errorCount}/5`
+				end
+				
+				self.BoothService.PlayerLost:Fire()
+			end
+			
+			task.wait()
+			if self.gameActive then
+				textBox:CaptureFocus()
+			end
+		end
+	end)
 	
 	self.typingConnection = textBox:GetPropertyChangedSignal("Text"):Connect(function()
 		if not self.gameActive then return end
@@ -476,6 +670,7 @@ function BoothController:SetupTypingInput(typingGui: Frame, preview: TextLabel)
 			else
 
 				self.errorCount += 1
+				print("[Client] Typing error:", self.errorCount, "/5 | Typed:", typedWord, "| Expected:", expectedWord)
 				self:_shakeTextBox(textBox)
 				self:ShowFeedback(false)
 				textBox.Text = ""
@@ -492,7 +687,8 @@ function BoothController:SetupTypingInput(typingGui: Frame, preview: TextLabel)
 	end)
 end
 
-function BoothController:CreateTypingGame(words: {string})
+function BoothController:CreateTypingGame(words: {string}, opponentUserId: number?)
+	print("[Client] CreateTypingGame - Words:", #words, "| Opponent:", opponentUserId or "none")
 	if not words or #words == 0 then return end
 	
 	local screenGui = self:_getCachedScreenGui()
@@ -504,11 +700,20 @@ function BoothController:CreateTypingGame(words: {string})
 	local preview = typingGui:FindFirstChild("Preview") :: TextLabel?
 	if not preview then return end
 	
-
 	self.currentWords = words
 	self.currentIndex = 1
 	self.errorCount = 0
 	self.gameActive = true
+	
+	if opponentUserId then
+		local bar = typingGui:FindFirstChild("Bar")
+		if bar then
+			local playerTemplate = bar:FindFirstChild("PlayerTemplate") :: ImageLabel?
+			if playerTemplate then
+				playerTemplate.Image = `rbxthumb://type=AvatarHeadShot&id={opponentUserId}&w=150&h=150`
+			end
+		end
+	end
 	
 
 	local errorsLabel = typingGui:FindFirstChild("Errors") :: TextLabel?
@@ -555,6 +760,7 @@ function BoothController:ResetProgressBar()
 end
 
 function BoothController:ShowGameResult(didWin: boolean, winnerName: string)
+	print("[Client] ShowGameResult - Won:", didWin, "| Winner:", winnerName)
 	self.gameActive = false
 	
 	local screenGui = self:_getCachedScreenGui()
@@ -582,10 +788,12 @@ function BoothController:ShowGameResult(didWin: boolean, winnerName: string)
 end
 
 function BoothController:_cleanup()
+	print("[Client] _cleanup - Resetting all game state")
 	self._countdownCancel = true
 	self.gameActive = false
 	self:HideStatusLabel()
 	self:HidePlaySoloButton()
+	self:CleanupVotingUI()
 	self:RevertCamera()
 	self:SetJumpAbility(true)
 	self:ResetProgressBar()
@@ -595,35 +803,66 @@ function BoothController:_cleanup()
 		self.typingConnection = nil
 	end
 	
+	if self._focusLostConnection then
+		self._focusLostConnection:Disconnect()
+		self._focusLostConnection = nil
+	end
+	
 	table.clear(self.currentWords)
 	self.currentIndex = 1
 	self.errorCount = 0
 end
 
 function BoothController:KnitStart()
+	print("[Client] BoothController started - Setting up signal connections")
 	local service = self.BoothService
 	
 	if service.UpdateCamera then
 		service.UpdateCamera:Connect(function(boothModel)
+			print("[Client] Signal received: UpdateCamera")
 			self:UpdateCamera(boothModel)
 		end)
 	end
 	
 	if service.RevertCamera then
 		service.RevertCamera:Connect(function()
+			print("[Client] Signal received: RevertCamera")
 			self:_cleanup()
 		end)
 	end
 	
 	if service.StartGame then
-		service.StartGame:Connect(function(boothModel, words)
-			task.wait(5.5)
-			self:CreateTypingGame(words)
+		service.StartGame:Connect(function(boothModel, words, opponentUserId)
+			print("[Client] Signal received: StartGame")
+			self:CreateTypingGame(words, opponentUserId)
+		end)
+	end
+	
+	if service.StartVoting then
+		service.StartVoting:Connect(function(difficulties, countdownSeconds)
+			print("[Client] Signal received: StartVoting")
+			self:HidePlaySoloButton()
+			self:ShowVotingUI(difficulties, countdownSeconds)
+		end)
+	end
+	
+	if service.UpdateVotes then
+		service.UpdateVotes:Connect(function(voteTable)
+			print("[Client] Signal received: UpdateVotes")
+			self:UpdateVotes(voteTable)
+		end)
+	end
+	
+	if service.VotingComplete then
+		service.VotingComplete:Connect(function(chosenDifficulty)
+			print("[Client] Signal received: VotingComplete")
+			self:ShowVotingResult(chosenDifficulty)
 		end)
 	end
 	
 	if service.BeginCountdown then
 		service.BeginCountdown:Connect(function(seconds)
+			print("[Client] Signal received: BeginCountdown")
 			self:HidePlaySoloButton()
 			self:ShowStartCountdown(seconds)
 		end)
@@ -631,6 +870,7 @@ function BoothController:KnitStart()
 	
 	if service.ShowGameResult then
 		service.ShowGameResult:Connect(function(didWin, winnerName)
+			print("[Client] Signal received: ShowGameResult")
 			self:ShowGameResult(didWin, winnerName)
 		end)
 	end
@@ -658,6 +898,7 @@ function BoothController:KnitStart()
 	
 	if service.UpdateBoothPlayerCount then
 		service.UpdateBoothPlayerCount:Connect(function(playerCount)
+			print("[Client] Signal received: UpdateBoothPlayerCount")
 			self:UpdateBoothPlayerCount(playerCount)
 		end)
 	end

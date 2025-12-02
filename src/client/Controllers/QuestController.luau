@@ -21,6 +21,7 @@ local QuestController = Knit.CreateController({
 })
 
 local QuestService
+local DataController
 local activeQuests = {}
 local resetTime = 0
 
@@ -68,7 +69,10 @@ local function updateQuestDisplay()
                     -- Update "Reward" with coin amount
                     local rewardLabel = questFrame:FindFirstChild("Reward")
                     if rewardLabel and rewardLabel:IsA("TextLabel") then
-                        rewardLabel.Text = string.format("+%d Coins", quest.Data.Reward)
+                        local data = DataController.getData()
+                        local hasDoubleCoins = data and data.DoubleCoins
+                        local reward = hasDoubleCoins and (quest.Data.Reward * 2) or quest.Data.Reward
+                        rewardLabel.Text = string.format("+%d Coins", reward)
                     end
                     
                     -- Update Bar -> Filler
@@ -157,6 +161,11 @@ function QuestController:KnitStart()
         updateQuestDisplay()
     end)
     
+    -- Update quest display when DoubleCoins status changes
+    DataController.onReplicated("DoubleCoins"):Connect(function()
+        updateQuestDisplay()
+    end)
+    
     RunService.Heartbeat:Connect(function()
         updateTimer()
     end)
@@ -164,6 +173,7 @@ end
 
 function QuestController:KnitInit()
     QuestService = Knit.GetService("QuestService")
+    DataController = Knit.GetController("DataController")
 end
 
 return QuestController

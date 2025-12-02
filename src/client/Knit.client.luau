@@ -76,6 +76,9 @@ do
 
     Knit.Start()
         :andThen(function()
+            -- Disable reset button
+            StarterGui:SetCore("ResetButtonCallback", false)
+            
             updateAllUIStrokeThickness()
             
             local DataController = Knit.GetController("DataController")

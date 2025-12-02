@@ -77,10 +77,7 @@ function DataService:createLeaderstats(player, data)
 			val.Parent = folder
 
 			val:GetPropertyChangedSignal("Value"):Connect(function()
-				print("[DataService] Leaderstats changed:", player.Name, key, val.Value)
-				
 				local isUpdating = self._updatingLeaderstats[player] and self._updatingLeaderstats[player][key]
-				print("[DataService] Is updating flag set?", isUpdating)
 				
 				if not isUpdating then
 					data[key] = val.Value
@@ -88,10 +85,7 @@ function DataService:createLeaderstats(player, data)
 				end
 				
 				if LeaderboardService and typeof(val.Value) == "number" then
-					print("[DataService] Calling LeaderboardService.onPlayerDataChange")
 					LeaderboardService.onPlayerDataChange(player, key, val.Value)
-				else
-					print("[DataService] LeaderboardService not available or value not number")
 				end
 			end)
 		end
@@ -99,10 +93,8 @@ function DataService:createLeaderstats(player, data)
 end
 
 function DataService:updateLeaderstats(player, statName, value)
-	print("[DataService] updateLeaderstats called:", player.Name, statName, value)
 	local leaderStats = player:FindFirstChild("leaderstats")
 	if not leaderStats then 
-		print("[DataService] No leaderstats folder found")
 		return 
 	end
 	
@@ -111,19 +103,14 @@ function DataService:updateLeaderstats(player, statName, value)
 	end
 	
 	self._updatingLeaderstats[player][statName] = true
-	print("[DataService] Setting _updatingLeaderstats flag for:", player.Name, statName)
 	
 	local statValue = leaderStats:FindFirstChild(statName)
 	if statValue and (statValue:IsA("IntValue") or statValue:IsA("NumberValue")) then
-		print("[DataService] Updating stat value from", statValue.Value, "to", value)
 		statValue.Value = value
-	else
-		print("[DataService] Stat not found or wrong type:", statName)
 	end
 	
 	task.wait()
 	self._updatingLeaderstats[player][statName] = false
-	print("[DataService] Cleared _updatingLeaderstats flag for:", player.Name, statName)
 end
 
 function DataService:setSession(player, session)

@@ -8,4 +8,5 @@ return {
 	WinRate = 100,
 	KeyboardInventory = {"Default"},
 	EquippedKeyboard = "Default",
+	DoubleCoins = false,
 }
