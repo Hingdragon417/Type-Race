@@ -33,6 +33,7 @@ local BoothController = Knit.CreateController({
 	currentBooth = nil :: Model?,
 	hiddenBillboards = {} :: {BillboardGui},
 	_countdownCancel = false :: boolean,
+	_playSoloButtonConnection = nil :: RBXScriptConnection?,
 	
 
 	_player = nil :: Player?,
@@ -171,6 +172,50 @@ function BoothController:SetJumpAbility(enabled: boolean)
 	if humanoid then
 		humanoid.JumpPower = enabled and DEFAULT_JUMP_POWER or 0
 		humanoid.JumpHeight = enabled and DEFAULT_JUMP_HEIGHT or 0
+	end
+end
+
+function BoothController:ShowPlaySoloButton()
+	local screenGui = self:_getCachedScreenGui()
+	if not screenGui then return end
+	
+	local playSoloButton = screenGui:FindFirstChild("PlaySolo") :: TextButton?
+	if playSoloButton then
+		playSoloButton.Visible = true
+		
+		-- Connect button click if not already connected
+		if self._playSoloButtonConnection then
+			self._playSoloButtonConnection:Disconnect()
+			self._playSoloButtonConnection = nil
+		end
+		
+		self._playSoloButtonConnection = playSoloButton.MouseButton1Click:Connect(function()
+			self:HidePlaySoloButton()
+			self.BoothService.PlaySolo:Fire()
+		end)
+	end
+end
+
+function BoothController:HidePlaySoloButton()
+	local screenGui = self:_getCachedScreenGui()
+	if not screenGui then return end
+	
+	local playSoloButton = screenGui:FindFirstChild("PlaySolo") :: TextButton?
+	if playSoloButton then
+		playSoloButton.Visible = false
+	end
+	
+	if self._playSoloButtonConnection then
+		self._playSoloButtonConnection:Disconnect()
+		self._playSoloButtonConnection = nil
+	end
+end
+
+function BoothController:UpdateBoothPlayerCount(playerCount: number)
+	if playerCount == 1 then
+		self:ShowPlaySoloButton()
+	else
+		self:HidePlaySoloButton()
 	end
 end
 
@@ -526,6 +571,7 @@ end
 function BoothController:_cleanup()
 	self._countdownCancel = true
 	self:HideStatusLabel()
+	self:HidePlaySoloButton()
 	self:RevertCamera()
 	self:SetJumpAbility(true)
 	
@@ -565,6 +611,7 @@ function BoothController:KnitStart()
 	
 	if service.BeginCountdown then
 		service.BeginCountdown:Connect(function(seconds)
+			self:HidePlaySoloButton()
 			self:ShowStartCountdown(seconds)
 		end)
 	end
@@ -593,6 +640,12 @@ function BoothController:KnitStart()
 	if service.UpdateOpponentProgress then
 		service.UpdateOpponentProgress:Connect(function(opponentUserId, progress)
 			self:UpdateOpponentProgress(opponentUserId, progress)
+		end)
+	end
+	
+	if service.UpdateBoothPlayerCount then
+		service.UpdateBoothPlayerCount:Connect(function(playerCount)
+			self:UpdateBoothPlayerCount(playerCount)
 		end)
 	end
 end
