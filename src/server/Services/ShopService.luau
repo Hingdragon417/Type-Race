@@ -194,6 +194,9 @@ local function spawnKeyboardsInShop()
             
             bobUp = function()
                 if not isBobbing then return end
+                if not clonedKeyboard or not clonedKeyboard.Parent then return end
+                if not clonedKeyboard.PrimaryPart or not clonedKeyboard.PrimaryPart.Parent then return end
+                
                 currentUpTween = TweenService:Create(
                     clonedKeyboard.PrimaryPart,
                     TweenInfo.new(bobSpeed, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
@@ -208,6 +211,9 @@ local function spawnKeyboardsInShop()
             
             bobDown = function()
                 if not isBobbing then return end
+                if not clonedKeyboard or not clonedKeyboard.Parent then return end
+                if not clonedKeyboard.PrimaryPart or not clonedKeyboard.PrimaryPart.Parent then return end
+                
                 currentDownTween = TweenService:Create(
                     clonedKeyboard.PrimaryPart,
                     TweenInfo.new(bobSpeed, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
@@ -232,6 +238,12 @@ local function spawnKeyboardsInShop()
             proximityPrompt.Triggered:Connect(function(player)
                 local session = DataService:getSession(player)
                 if not session or not session.Data then
+                    return
+                end
+                
+                -- Check if player already owns this keyboard
+                if session.Data.KeyboardInventory and table.find(session.Data.KeyboardInventory, keyboardData.Name) then
+                    warn("[ShopService] Player", player.Name, "already owns", keyboardData.DisplayName)
                     return
                 end
                 

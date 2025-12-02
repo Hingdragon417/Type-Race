@@ -19,6 +19,7 @@ local BoothService = Knit.CreateService({
         ValidateWordCompletion = Knit.CreateSignal(),
         UpdateWPM = Knit.CreateSignal(),
         UpdateOpponentProgress = Knit.CreateSignal(),
+        UpdateBoothPlayerCount = Knit.CreateSignal(),
     }
 })
 
@@ -482,6 +483,12 @@ function BoothService:AddPlayerToBooth(player: Player, boothModel: Model)
     self.Client.UpdateCamera:Fire(player, boothModel)
     updateBoothStatus(boothModel, playerCount)
     
+    -- Notify all players in booth of the player count
+    local playersInBooth = getPlayersInBooth(boothModel)
+    for _, p in ipairs(playersInBooth) do
+        self.Client.UpdateBoothPlayerCount:Fire(p, playerCount)
+    end
+    
     if playerCount >= REQUIRED_PLAYERS then
         startBoothCountdown(boothModel)
     end
@@ -539,6 +546,12 @@ function BoothService:RemovePlayerFromBooth(player: Player)
     
     local playerCount = countPlayersInBooth(boothModel)
     updateBoothStatus(boothModel, playerCount)
+    
+    -- Notify remaining players in booth of the new player count
+    local playersInBooth = getPlayersInBooth(boothModel)
+    for _, p in ipairs(playersInBooth) do
+        self.Client.UpdateBoothPlayerCount:Fire(p, playerCount)
+    end
     
     boothCountdowns[boothModel] = nil
     

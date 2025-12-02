@@ -7,7 +7,11 @@ local Packages = ReplicatedStorage.Packages
 local Knit = require(Packages.Knit)
 
 local localPlayer = Players.LocalPlayer
-local playerGui = localPlayer:WaitForChild("PlayerGui")
+local playerGui = localPlayer:FindFirstChild("PlayerGui")
+while not playerGui do
+	task.wait()
+	playerGui = localPlayer:FindFirstChild("PlayerGui")
+end
 local camera = workspace.CurrentCamera
 local BASE_SIZE = 1920
 
