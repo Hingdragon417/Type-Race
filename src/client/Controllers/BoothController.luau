@@ -297,6 +297,8 @@ function BoothController:ShowStartCountdown(seconds: number?)
 end
 
 function BoothController:UpdateOpponentProgress(opponentUserId: number, progress: number)
+	if not self.gameActive then return end
+	
 	local screenGui = self:_getCachedScreenGui()
 	if not screenGui then return end
 	
@@ -309,7 +311,9 @@ function BoothController:UpdateOpponentProgress(opponentUserId: number, progress
 	local playerTemplate = bar:FindFirstChild("PlayerTemplate") :: ImageLabel?
 	if not playerTemplate then return end
 	
-	playerTemplate.Image = `rbxthumb://type=AvatarHeadShot&id={opponentUserId}&w=150&h=150`
+	if playerTemplate.Image == "" then
+		playerTemplate.Image = `rbxthumb://type=AvatarHeadShot&id={opponentUserId}&w=150&h=150`
+	end
 	
 	local targetX = progress * bar.AbsoluteSize.X
 	createTween(
@@ -528,6 +532,28 @@ function BoothController:CreateTypingGame(words: {string})
 	end
 end
 
+function BoothController:ResetProgressBar()
+	local screenGui = self:_getCachedScreenGui()
+	if not screenGui then return end
+	
+	local typingGui = screenGui:FindFirstChild("TypingGame")
+	if not typingGui then return end
+	
+	local bar = typingGui:FindFirstChild("Bar")
+	if not bar then return end
+	
+	local fill = bar:FindFirstChild("Fill") :: Frame?
+	if fill then
+		fill.Size = UDim2.new(0, 0, 1, 0)
+	end
+	
+	local playerTemplate = bar:FindFirstChild("PlayerTemplate") :: ImageLabel?
+	if playerTemplate then
+		playerTemplate.Image = ""
+		playerTemplate.Position = UDim2.new(0, 0, playerTemplate.Position.Y.Scale, playerTemplate.Position.Y.Offset)
+	end
+end
+
 function BoothController:ShowGameResult(didWin: boolean, winnerName: string)
 	self.gameActive = false
 	
@@ -536,23 +562,10 @@ function BoothController:ShowGameResult(didWin: boolean, winnerName: string)
 		local typingGui = screenGui:FindFirstChild("TypingGame")
 		if typingGui then
 			typingGui.Visible = false
-			
-
-			local bar = typingGui:FindFirstChild("Bar")
-			if bar then
-				local fill = bar:FindFirstChild("Fill") :: Frame?
-				if fill then
-					fill.Size = UDim2.new(0, 0, 1, 0)
-				end
-				
-				local playerTemplate = bar:FindFirstChild("PlayerTemplate") :: ImageLabel?
-				if playerTemplate then
-					playerTemplate.Image = ""
-					playerTemplate.Position = UDim2.new(0, 0, playerTemplate.Position.Y.Scale, playerTemplate.Position.Y.Offset)
-				end
-			end
 		end
 	end
+	
+	self:ResetProgressBar()
 	
 	local statusLabel = self:_findStatusLabel()
 	if not statusLabel then return end
@@ -570,21 +583,21 @@ end
 
 function BoothController:_cleanup()
 	self._countdownCancel = true
+	self.gameActive = false
 	self:HideStatusLabel()
 	self:HidePlaySoloButton()
 	self:RevertCamera()
 	self:SetJumpAbility(true)
+	self:ResetProgressBar()
 	
 	if self.typingConnection then
 		self.typingConnection:Disconnect()
 		self.typingConnection = nil
 	end
 	
-
 	table.clear(self.currentWords)
 	self.currentIndex = 1
 	self.errorCount = 0
-	self.gameActive = false
 end
 
 function BoothController:KnitStart()
