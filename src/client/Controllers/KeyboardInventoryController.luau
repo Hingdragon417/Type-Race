@@ -255,6 +255,7 @@ function KeyboardInventoryController:KnitStart()
 	pollConnection = RunService.RenderStepped:Connect(function()
 		if pollForElements() then
 			pollConnection:Disconnect()
+			print("[KeyboardInventoryController] All elements found and ready!")
 			
 			-- Now that elements are ready, load keyboards
 			local DataController = Knit.GetController("DataController")

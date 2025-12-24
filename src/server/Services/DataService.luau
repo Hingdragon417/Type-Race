@@ -20,6 +20,7 @@ local SHOULD_SAVE = true
 
 local MAX_RETRIES = 10
 local RETRY_DELAY = 1.5
+local PLAYTIME_UPDATE_INTERVAL = 1 -- Update playtime every 1 second
 
 local DataService = Knit.CreateService({
 	Name = "DataService",
@@ -138,6 +139,27 @@ function DataService.waitForSession(player, timeout)
 	return session
 end
 
+function DataService:startPlaytimeTracking(player)
+	if self._playtimeConnections[player] then return end
+	
+	self._playtimeConnections[player] = task.spawn(function()
+		while player.Parent == Players do
+			task.wait(PLAYTIME_UPDATE_INTERVAL)
+			local session = self:getSession(player)
+			if session and session.Data then
+				session.Data.Playtime = (session.Data.Playtime or 0) + PLAYTIME_UPDATE_INTERVAL
+			end
+		end
+	end)
+end
+
+function DataService:stopPlaytimeTracking(player)
+	if self._playtimeConnections[player] then
+		task.cancel(self._playtimeConnections[player])
+		self._playtimeConnections[player] = nil
+	end
+end
+
 function DataService.onPlayerAdded(player)
 	local userId = tostring(player.UserId)
 	local session
@@ -177,11 +199,13 @@ function DataService.onPlayerAdded(player)
 	DataService:setSession(player, session)
 	DataService:Replicate(player)
 	DataService:createLeaderstats(player, session.Data)
+	DataService:startPlaytimeTracking(player)
 end
 
 function DataService.onPlayerRemoving(player)
 	local session = DataService:getSession(player)
 	if session then
+		DataService:stopPlaytimeTracking(player)
 		DataService._onPlayerRemoving:Fire(player)
 		session:EndSession()
 		DataService:clearSession(player)
@@ -203,6 +227,7 @@ function DataService:KnitInit()
 	self._store = ProfileStore.New(STORE_NAME, DATA_TEMPLATE)
 	self._cache = {}
 	self._onPlayerRemoving = Signal.new()
+	self._playtimeConnections = {}
 	
 	LeaderboardService = Knit.GetService("LeaderboardService")
 

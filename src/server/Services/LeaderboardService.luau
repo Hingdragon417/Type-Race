@@ -31,11 +31,13 @@ local Leaderboards = {
 	maxEntries = 10,
 	SavedStats = {
 		"Winstreak",
-		"Wins"
+		"Wins",
+		"Playtime"
 	},
 	StatColours = {
 		Winstreak = Color3.fromRGB(255, 145, 0),
 		Wins = Color3.fromRGB(42, 126, 194),
+		Playtime = Color3.fromRGB(76, 175, 80),
 	},
 	updateCooldowns = {},
 	cooldownTime = 3,

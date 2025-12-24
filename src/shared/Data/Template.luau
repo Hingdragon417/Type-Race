@@ -9,4 +9,5 @@ return {
 	KeyboardInventory = {"Default"},
 	EquippedKeyboard = "Default",
 	DoubleCoins = false,
+	Playtime = 0,
 }
