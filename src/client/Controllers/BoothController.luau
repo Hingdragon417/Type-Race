@@ -32,6 +32,7 @@ local RESULT_DISPLAY_TIME = 3
 local TWEEN_DURATION = 0.3
 local SHAKE_DURATION = 0.05
 local MAX_DISPLAY_WORDS = 35
+local MAX_ERRORS = 5
 local DEFAULT_JUMP_POWER = 50
 local DEFAULT_JUMP_HEIGHT = 7.2
 
@@ -56,6 +57,7 @@ local BoothController = Knit.CreateController({
 	_votingContainer = nil :: Frame?,
 	_hasVoted = false :: boolean,
 	_currentVote = nil :: string?,
+	_feedbackVersion = 0 :: number,
 
 	_player = nil :: Player?,
 	_playerGui = nil :: PlayerGui?,
@@ -266,6 +268,9 @@ function BoothController:ShowFeedback(isCorrect: boolean)
 	local statusLabel = self:_findStatusLabel()
 	if not statusLabel then return end
 	
+	self._feedbackVersion += 1
+	local version = self._feedbackVersion
+	
 	statusLabel.Visible = true
 	statusLabel.Text = isCorrect and "Correct" or "Incorrect"
 	statusLabel.TextColor3 = isCorrect and COLOR_GREEN or COLOR_RED
@@ -280,6 +285,7 @@ function BoothController:ShowFeedback(isCorrect: boolean)
 	end
 	
 	task.delay(FEEDBACK_DISPLAY_TIME, function()
+		if self._feedbackVersion ~= version then return end
 		if statusLabel.Parent then
 			statusLabel.Visible = false
 			statusLabel.TextColor3 = COLOR_YELLOW
@@ -631,7 +637,7 @@ function BoothController:SetupTypingInput(typingGui: Frame, preview: TextLabel)
 				Log("Enter pressed - Word correct: " .. text)
 				self:_handleWordCompletion(textBox, typingGui, preview, expectedWord, tick())
 				self:ShowFeedback(true)
-			elseif #text > 0 then
+			elseif #text > 0 and self.errorCount < MAX_ERRORS then
 				self.errorCount += 1
 				Log("Enter pressed - Typing error: " .. tostring(self.errorCount) .. "/5 | Typed: " .. text .. " | Expected: " .. expectedWord)
 				self:_shakeTextBox(textBox)
@@ -645,6 +651,10 @@ function BoothController:SetupTypingInput(typingGui: Frame, preview: TextLabel)
 				end
 				
 				self.BoothService.PlayerLost:Fire()
+				
+				if self.errorCount >= MAX_ERRORS then
+					self.gameActive = false
+				end
 			end
 			
 			task.wait()
@@ -696,7 +706,7 @@ function BoothController:SetupTypingInput(typingGui: Frame, preview: TextLabel)
 			if typedWord == expectedWord then
 				lastValidationTime = self:_handleWordCompletion(textBox, typingGui, preview, expectedWord, currentTime)
 				self:ShowFeedback(true)
-			else
+			elseif self.errorCount < MAX_ERRORS then
 
 				self.errorCount += 1
 				Log("Typing error: " .. tostring(self.errorCount) .. "/5 | Typed: " .. tostring(typedWord) .. " | Expected: " .. expectedWord)
@@ -711,6 +721,10 @@ function BoothController:SetupTypingInput(typingGui: Frame, preview: TextLabel)
 				end
 				
 				self.BoothService.PlayerLost:Fire()
+				
+				if self.errorCount >= MAX_ERRORS then
+					self.gameActive = false
+				end
 			end
 		end
 	end)
@@ -791,6 +805,7 @@ end
 function BoothController:ShowGameResult(didWin: boolean, winnerName: string)
 	Log("ShowGameResult - Won: " .. tostring(didWin) .. " | Winner: " .. winnerName)
 	self.gameActive = false
+	self._feedbackVersion += 1
 	
 	local screenGui = self:_getCachedScreenGui()
 	if screenGui then

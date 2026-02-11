@@ -101,6 +101,28 @@ local function setBoothHitboxCanCollide(boothModel: Model, canCollide: boolean)
 	end
 end
 
+local function setBoothRootCanCollide(boothModel: Model, canCollide: boolean)
+	local root = boothModel:FindFirstChild("Root")
+	if root and root:IsA("BasePart") then
+		root.CanCollide = canCollide
+	end
+end
+
+local function teleportPlayerToSpawn(player: Player)
+	local character = player and player.Character
+	if not character then return end
+	
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+	
+	local spawnLocation = workspace:FindFirstChildWhichIsA("SpawnLocation", true)
+	if spawnLocation then
+		hrp.CFrame = spawnLocation.CFrame + Vector3.new(0, 3, 0)
+	else
+		hrp.CFrame = CFrame.new(0, 10, 0)
+	end
+end
+
 local function clearPlayerData(player: Player)
 	playerErrors[player] = nil
 	playerWordsCompleted[player] = nil
@@ -116,6 +138,7 @@ local function endGame(boothModel: Model)
 	soloGameBots[boothModel] = nil
 	activeGames[boothModel] = nil
 	setBoothHitboxCanCollide(boothModel, false)
+	setBoothRootCanCollide(boothModel, false)
 
 	for _, player in ipairs(getPlayersInBooth(boothModel)) do
 		print("[Server] Clearing player data for:", player.Name)
@@ -596,6 +619,8 @@ end
 
 local function startBoothCountdown(boothModel: Model)
 	if boothCountdowns[boothModel] then return end
+	if boothVotes[boothModel] then return end
+	if isGameActive(boothModel) then return end
 
 	boothCountdowns[boothModel] = true
 
@@ -659,8 +684,22 @@ local function spawnKeyboardForPlayer(player: Player, boothModel: Model, seatNam
 	spawnedKeyboards[boothModel][player] = clonedKeyboard
 end
 
-function BoothService:AddPlayerToBooth(player: Player, boothModel: Model)
-	if not player or not player.Parent or activeBooths[player] then return end
+function BoothService:AddPlayerToBooth(player: Player, boothModel: Model): boolean
+	if not player or not player.Parent or activeBooths[player] then return false end
+
+	-- Reject players trying to join a solo voting phase or solo game
+	local votingData = boothVotes[boothModel]
+	local gameData = activeGames[boothModel]
+	if (votingData and votingData.isSolo) or (gameData and gameData.isSoloGame) or isGameActive(boothModel) then
+		print("[Server] Rejected player from booth (game/solo in progress):", player.Name)
+		task.defer(function()
+			kickPlayerFromSeat(player)
+			task.wait(0.1)
+			teleportPlayerToSpawn(player)
+		end)
+		self.Client.RevertCamera:Fire(player)
+		return false
+	end
 
 	print("[Server] Adding player to booth:", player.Name, "| Booth:", boothModel.Name)
 	activeBooths[player] = boothModel
@@ -674,9 +713,11 @@ function BoothService:AddPlayerToBooth(player: Player, boothModel: Model)
 		self.Client.UpdateBoothPlayerCount:Fire(p, playerCount)
 	end
 
-	if playerCount >= REQUIRED_PLAYERS then
+	if playerCount >= REQUIRED_PLAYERS and not boothVotes[boothModel] and not isGameActive(boothModel) then
 		startBoothCountdown(boothModel)
 	end
+
+	return true
 end
 
 function BoothService:RemovePlayerFromBooth(player: Player)
@@ -727,8 +768,10 @@ local function onSeatOccupancyChanged(seat: Seat, boothModel: Model)
 	if occupant then
 		local player = Players:GetPlayerFromCharacter(occupant.Parent)
 		if player then
-			BoothService:AddPlayerToBooth(player, boothModel)
-			spawnKeyboardForPlayer(player, boothModel, seat.Name)
+			local accepted = BoothService:AddPlayerToBooth(player, boothModel)
+			if accepted then
+				spawnKeyboardForPlayer(player, boothModel, seat.Name)
+			end
 		end
 	else
 		for _, player in ipairs(getPlayersInBooth(boothModel)) do
@@ -787,6 +830,7 @@ function BoothService:KnitStart()
 
 		local boothModel = activeBooths[player]
 		if not boothModel or not isGameActive(boothModel) or not playerErrors[player] then return end
+		if hasPlayerWon[player] ~= nil then return end
 
 		playerErrors[player] = playerErrors[player] + 1
 		print("[Server] Player error count:", player.Name, "|", playerErrors[player], "/", MAX_ERRORS)
@@ -795,11 +839,16 @@ function BoothService:KnitStart()
 			print("[Server] Player reached max errors, triggering loss:", player.Name)
 			hasPlayerWon[player] = false
 
-			for _, otherPlayer in ipairs(getPlayersInBooth(boothModel)) do
-				if otherPlayer ~= player then
-					hasPlayerWon[otherPlayer] = hasPlayerWon[otherPlayer] or true
-					endGameWithWinner(boothModel, otherPlayer)
-					break
+			local gameData = activeGames[boothModel]
+			if gameData and gameData.isSoloGame then
+				task.spawn(endSoloGame, boothModel, player, false)
+			else
+				for _, otherPlayer in ipairs(getPlayersInBooth(boothModel)) do
+					if otherPlayer ~= player then
+						hasPlayerWon[otherPlayer] = hasPlayerWon[otherPlayer] or true
+						endGameWithWinner(boothModel, otherPlayer)
+						break
+					end
 				end
 			end
 		end
@@ -854,6 +903,7 @@ function BoothService:KnitStart()
 
 		print("[Server] Starting solo game for:", player.Name)
 		hideBoothStatus(boothModel)
+		setBoothRootCanCollide(boothModel, true)
 		startVotingPhase(boothModel, true)
 	end)
 

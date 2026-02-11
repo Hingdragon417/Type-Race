@@ -76,8 +76,16 @@ do
 
     Knit.Start()
         :andThen(function()
-            -- Disable reset button
-            StarterGui:SetCore("ResetButtonCallback", false)
+            -- Disable reset button persistently
+            task.spawn(function()
+                local success = false
+                while not success do
+                    success = pcall(function()
+                        StarterGui:SetCore("ResetButtonCallback", false)
+                    end)
+                    if not success then task.wait(0.5) end
+                end
+            end)
             
             updateAllUIStrokeThickness()
             
